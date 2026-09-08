@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+checkpoints/
+results/
+data/*.npy
+data/*.npz
+data/*.png
+data/*.jpg
+!data/.gitkeep
+.venv/
+*.pt

@@ -1,0 +1,40 @@
+# R-D LOWER BOUND on standard Gaussians of increasing dimension (paper Sec. 6.1 / Fig. 2a-bottom).
+# Sweeps data_dim over [2, 4, 8, 16] (the paper's LB dimensions) x lambda. The log-u net is
+# auto-sized per dimension via hidden_units_per_dim=20 -> 2 hidden layers of 20n SeLU units
+# (paper A.5.2), so it stays small and fits in memory (unlike n=1000, which OOMs).
+#
+# Trains each run with the fast ("quick") inner optimizer, then (--eval_after) runs the
+# exhaustive optimizer to write the reported rd-*.npz.
+#
+# Run it with:  python scripts/run_sweep.py --config configs/gaussian_lb.yaml
+#
+# NOTE: these are STANDARD Gaussians (no gparams_path) and a separate checkpoint_dir from the
+# n=1000 upper-bound runs, because this is the paper's own LB study (Fig. 2a-bottom), not a
+# single-source sandwich with the UB. Its true R(D) (per-dimension) is the standard-Gaussian
+# curve, so plot it separately from the n=1000 UB figure.
+
+script: train_rdlb
+
+fixed:
+  dataset: gaussian            # standard Gaussian N(0, I) (no gparams_path)
+  model: mlp
+  hidden_units_per_dim: 20     # -> units = [20n, 20n]  (paper A.5.2)
+  num_hidden_layers: 2
+  activation: selu
+  checkpoint_dir: checkpoints/gaussian_lb
+  command: train
+  batchsize: 1024              # k (paper fixes k=1024 for the varying-n LB study)
+  num_Ck_samples: 2            # M
+  last_step: 3000
+  checkpoint_interval: 3000
+  y_init: quick
+  y_quick_topn: 10
+  y_steps: 500
+  lr: 5.0e-4
+  eval_after: true
+  eval_num_Ck_samples: 5
+  verbose: true
+
+sweep:
+  data_dim: [2, 4, 8, 16]
+  lamb: [1, 3, 10, 30, 100, 300, 1000]

@@ -1,0 +1,40 @@
+# R-D UPPER BOUND sweep on the n=1000 Gaussian source (paper Sec. 6.1 / Fig. 2a-top),
+# with a decoder and varying latent_dim. Reproduces the author's command:
+#
+#   n=1000; parallel python rdub_mlp.py -V --dataset gaussian \
+#     --gparams_path data/gaussian_params-dim=$n.npz --data_dim $n --latent_dim {1} \
+#     --checkpoint_dir checkpoints/gaussian --prior_type gmm_1 --posterior_type gaussian \
+#     --encoder_activation none --decoder_activation leaky_relu --decoder_units $n \
+#     --lambda {2} --rpd train --epochs 80 --steps_per_epoch 1000 --lr 5e-4 --batchsize 64 \
+#     ::: 400 500 600 800 ::: 0.3 1 3 10 30 100 300
+#
+# Run it with:  python scripts/run_sweep.py --config configs/gaussian_ub.yaml
+# (add --dry-run to preview the 4 x 7 = 28 commands, or -j N to run N at a time)
+
+script: train_rdub
+
+# Flags identical across every run.
+fixed:
+  dataset: gaussian
+  # Path to the fixed random Gaussian source. This is the file shipped in the repo;
+  # regenerate with:  python scripts/gen_gaussian_params.py --save_dir data/gaussian --dim 1000
+  gparams_path: data/gaussian/gaussian_params-dim=1000.npz
+  data_dim: 1000
+  checkpoint_dir: checkpoints/gaussian
+  prior_type: gmm_1
+  posterior_type: gaussian
+  encoder_activation: none
+  decoder_activation: leaky_relu
+  decoder_units: 1000        # decoder present (Z != Y), mapping Z -> Y
+  rpd: true                  # report rate per dimension
+  epochs: 80
+  steps_per_epoch: 1000
+  lr: 5.0e-4                 # note: write 5.0e-4, not 5e-4 (YAML parses 5e-4 as a string)
+  batchsize: 64
+  verbose: true
+
+# Flags to vary. run_sweep.py runs the Cartesian product (the ::: lists above):
+# 4 latent_dim values x 7 lambda values = 28 runs.
+sweep:
+  latent_dim: [1000, 2000]
+  lambda: [0.3, 1, 3, 10, 30, 100, 300]

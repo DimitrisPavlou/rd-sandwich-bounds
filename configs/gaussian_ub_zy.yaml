@@ -1,0 +1,31 @@
+# R-D UPPER BOUND on the n=1000 Gaussian source with Z == Y (no decoder / identity).
+# This is the *tight* configuration from the paper (Fig. 2a-top, "R_U(D), Z=Y"),
+# which for a factorized Gaussian is optimal and should hug the true R(D).
+# Mirrors the second block of experiments/gaussian.sh and the README quickstart.
+#
+# Run it with:  python scripts/run_sweep.py --config configs/gaussian_ub_zy.yaml
+# Then re-plot: python scripts/plot_rdub.py   (it aggregates ALL rdub-* runs,
+#               so this Z=Y curve is added alongside the dim(Z)<n curves).
+
+script: train_rdub
+
+fixed:
+  dataset: gaussian
+  gparams_path: data/gaussian/gaussian_params-dim=1000.npz
+  data_dim: 1000
+  latent_dim: 1000            # = data_dim; with decoder_units=0 the code forces Z==Y anyway
+  checkpoint_dir: checkpoints/gaussian
+  prior_type: gmm_1
+  posterior_type: gaussian
+  encoder_activation: none
+  decoder_activation: none
+  decoder_units: 0            # <-- Z == Y: no decoder network (identity map)
+  rpd: true
+  epochs: 80
+  steps_per_epoch: 1000
+  lr: 5.0e-4
+  batchsize: 64
+  verbose: true
+
+sweep:
+  lambda: [0.3, 1, 3, 10, 30, 100, 300]

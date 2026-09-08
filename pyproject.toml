@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rdsandwich"
+version = "0.1.0"
+description = "PyTorch re-implementation of 'Towards Empirical Sandwich Bounds on the Rate-Distortion Function' (Yang & Mandt, ICLR 2022)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.23",
+    "scipy>=1.9",
+    "Pillow>=9.0",
+    "torchvision>=0.15",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+images = ["compressai>=1.2", "pytorch-pretrained-biggan>=0.1.1"]
+dev = ["pytest>=7.0", "matplotlib>=3.5"]
+
+[tool.setuptools.packages.find]
+include = ["rdsandwich*"]
