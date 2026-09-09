@@ -7,11 +7,11 @@ becomes Gaussian-mixture mode-finding).
 """
 from .config import RDLBTrainConfig
 from .model import build_log_u_model
-from .algorithm import batch_mse, compute_Ck_obj, optimize_y
+from .algorithm import batch_mse, compute_Ck_obj, optimize_y, optimize_y_vectorized
 from .trainer import LowerBoundTrainer, estimate_R_lower_bound
 
 __all__ = [
     "RDLBTrainConfig", "build_log_u_model",
-    "batch_mse", "compute_Ck_obj", "optimize_y",
+    "batch_mse", "compute_Ck_obj", "optimize_y", "optimize_y_vectorized",
     "LowerBoundTrainer", "estimate_R_lower_bound",
 ]

@@ -63,7 +63,7 @@ def main():
     args = parse_args()
     seed_everything(args.seed)
     device = get_device(args.device)
-
+    print(device)
     if check_no_decoder(args.decoder_units):
         print(f"Using Z=Y; resetting latent_dim={args.latent_dim} to data_dim={args.data_dim}")
         args.latent_dim = args.data_dim
