@@ -36,5 +36,5 @@ fixed:
 # Flags to vary. run_sweep.py runs the Cartesian product (the ::: lists above):
 # 4 latent_dim values x 7 lambda values = 28 runs.
 sweep:
-  latent_dim: [1000, 2000]
+  latent_dim: [400, 600, 800]
   lambda: [0.3, 1, 3, 10, 30, 100, 300]

@@ -30,6 +30,11 @@ fixed:
   y_init: quick
   y_quick_topn: 10
   y_steps: 500
+  y_sequential: false          # false = vectorized inner optimizer (fast on GPU; the default).
+                               #   Set true to use the per-candidate sequential loop instead
+                               #   (the image-case fallback). For images, prefer keeping this
+                               #   false and setting `cand_chunk` to bound the [P, k, *dims] term.
+  # cand_chunk: 64             # vectorized only: chunk the P candidates to cap peak memory.
   lr: 5.0e-4
   eval_after: true
   eval_num_Ck_samples: 5

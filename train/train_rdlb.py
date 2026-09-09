@@ -68,6 +68,13 @@ def parse_args():
     p.add_argument("--y_steps", type=int, default=500)
     p.add_argument("--y_tol", type=float, default=1e-6)
     p.add_argument("--y_lr", type=float, default=1e-2)
+    p.add_argument("--y_sequential", action="store_true",
+                   help="Use the per-candidate sequential inner optimizer instead of the "
+                        "(default) vectorized one. Slower, but useful for the image case if the "
+                        "vectorized [P, k, *dims] term is a concern beyond what --cand_chunk handles.")
+    p.add_argument("--cand_chunk", type=int, default=None,
+                   help="Vectorized optimizer only: process the P candidates in chunks of this "
+                        "size to bound peak memory ([cand_chunk, k, *dims]) on high-dim/image data.")
 
     # Train-only.
     p.add_argument("--lr", type=float, default=1e-4)
@@ -101,6 +108,7 @@ def run_eval_and_save(model, source, args, save_dir, device, num_Ck_samples, y_i
         lamb=args.lamb, batchsize=args.batchsize, num_Ck_samples=num_Ck_samples,
         y_steps=args.y_steps, y_lr=args.y_lr, y_tol=args.y_tol,
         y_init=y_init, y_quick_topn=args.y_quick_topn, chunksize=args.chunksize,
+        y_sequential=args.y_sequential, cand_chunk=args.cand_chunk,
     )
     res = estimate_R_lower_bound(model, source, args.lamb, cfg, device=device)
     print(f"R_ = {res['R_']:.4f} nats/sample (linear lower-bound intercept at slope -{args.lamb})")
@@ -135,6 +143,7 @@ def main():
             y_init=args.y_init, y_quick_topn=args.y_quick_topn, beta=args.beta,
             log_E_Ck_max_delta=args.log_E_Ck_max_delta, chunksize=args.chunksize,
             checkpoint_interval=args.checkpoint_interval,
+            y_sequential=args.y_sequential, cand_chunk=args.cand_chunk,
         )
         log_path = os.path.join(save_dir, f"record-{get_time_str()}.jsonl")
         print(f"Logging to {log_path}")
