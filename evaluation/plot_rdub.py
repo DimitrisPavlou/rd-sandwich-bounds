@@ -62,9 +62,14 @@ def _has_decoder(cfg):
     return not (isinstance(dec, (list, tuple)) and len(dec) == 1 and dec[0] <= 0)
 
 
-def collect_ub_points(checkpoint_dir):
+def collect_ub_points(checkpoint_dir, per_sample=False):
     """Return (curves, run_dirs, n_dim), where curves is a list of
-    (label, [(D, R_nats_per_dim, lambda), ...]) ordered for plotting.
+    (label, [(D, R, lambda), ...]) ordered for plotting.
+
+    Rate unit: nats per sample per *dimension* by default (the Gaussian panel,
+    Fig. 2a); with ``per_sample=True`` it is nats per sample (total over all n
+    dims), which is the convention of the physics/speech panels (Fig. 2b,c),
+    whose rate axis runs to ~6 nats rather than ~0.4.
 
     Runs are grouped by (has-decoder, latent_dim) so that a Z==Y run and a
     decoder run at the same latent_dim (both dim(Z)=n) stay as *separate*
@@ -87,7 +92,11 @@ def collect_ub_points(checkpoint_dir):
         R = float(rec["rate"])                   # as logged
         if not cfg.get("nats", False):
             R *= LN2                             # bits -> nats
-        R = R if cfg.get("rpd", False) else R / n  # -> nats per sample per dimension
+        # Normalize to per-sample nats first (undo the trainer's --rpd if set)...
+        R = R * n if cfg.get("rpd", False) else R
+        # ...then to the requested axis unit.
+        if not per_sample:
+            R = R / n                            # -> nats per sample per dimension
         if _has_decoder(cfg):
             frac = f" ({ld / n:g}n)" if n else ""
             label = f"dim(Z)={ld}{frac}"
@@ -135,6 +144,14 @@ def main():
                    help="Gaussian params for the analytical true R(D); omit/point to a missing "
                         "file to skip the true curve (e.g. for non-Gaussian sources).")
     p.add_argument("--out", default="results/gaussian_sandwich.png")
+    p.add_argument("--per_sample", action="store_true",
+                   help="Plot rate as nats per sample (total over all n dims), the physics/"
+                        "speech convention (Fig. 2b,c, axis ~0-6). Default is per-dimension "
+                        "(the Gaussian panel, Fig. 2a).")
+    p.add_argument("--title", default=None, help="Override the figure title.")
+    p.add_argument("--lb_tangents", action="store_true",
+                   help="Show each lower-bound lambda as its own tangent line instead of a single "
+                        "envelope curve R_L(D) (the default, which matches the paper's two-curve figure).")
     p.add_argument("--show", action="store_true", help="Also open an interactive window.")
     args = p.parse_args()
 
@@ -143,7 +160,7 @@ def main():
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    curves, run_dirs, n_dim = collect_ub_points(args.checkpoint_dir)
+    curves, run_dirs, n_dim = collect_ub_points(args.checkpoint_dir, per_sample=args.per_sample)
     if not curves:
         raise SystemExit(f"No rdub-* runs with logs+checkpoints found under {args.checkpoint_dir!r}.")
 
@@ -162,19 +179,29 @@ def main():
         Rs = [r for _, r, _ in pts]
         ax.plot(Ds, Rs, "o-", ms=4, label=f"R_U(D), {label}")
 
-    # Lower-bound lines, if any train_rdlb eval outputs exist.
+    # Lower bound: each train_rdlb eval (one lambda) is a tangent line to R(D); the
+    # certified bound is their upper envelope (max over lambda), drawn as ONE curve
+    # like the paper. Pass --lb_tangents to instead show the individual tangent lines.
     lb_lines = collect_lb_lines(args.checkpoint_dir)
     if lb_lines and n_dim:
         d_lo, d_hi = min(all_D), max(all_D)
-        dd = np.linspace(d_lo, d_hi, 50)
-        for lam, intercept in sorted(lb_lines):
-            r_perdim = (intercept - lam * dd) / n_dim   # per-sample nats -> per dim
-            ax.plot(dd, np.clip(r_perdim, 0, None), "--", lw=1,
-                    label=f"R_L(D), lamb={lam:g}")
+        dd = np.linspace(d_lo, d_hi, 200)
+        norm = 1.0 if args.per_sample else float(n_dim)   # per-sample nats -> per dim
+        if args.lb_tangents:
+            for lam, intercept in sorted(lb_lines):
+                r = np.clip((intercept - lam * dd) / norm, 0, None)
+                ax.plot(dd, r, "--", lw=1, label=f"R_L(D), lamb={lam:g}")
+        else:
+            env = np.full_like(dd, -np.inf)
+            for lam, intercept in lb_lines:
+                env = np.maximum(env, (intercept - lam * dd) / norm)
+            ax.plot(dd, np.clip(env, 0, None), "--", color="crimson", lw=2,
+                    label="R_L(D)")
 
     ax.set_xlabel("Distortion (mean squared error)")
-    ax.set_ylabel("Rate (nats per sample per dimension)")
-    ax.set_title(f"Gaussian R-D sandwich (n={n_dim})")
+    ax.set_ylabel("Rate (nats per sample)" if args.per_sample
+                  else "Rate (nats per sample per dimension)")
+    ax.set_title(args.title or f"{os.path.basename(args.checkpoint_dir.rstrip('/\\')) or 'R-D'} R-D bound (n={n_dim})")
     ax.set_ylim(bottom=0)
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)

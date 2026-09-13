@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch.utils.data import IterableDataset
 
 from .io import JsonlLogger, save_checkpoint
 
@@ -65,13 +66,36 @@ class BaseTrainer:
             batch = next(self._iter)
         return batch.to(self.device)
 
+    def _is_infinite_loader(self) -> bool:
+        """True for analytic sources wrapped as an ``InfiniteBatchDataset``.
+
+        Finite map-style datasets (physics/speech arrays, image folders) have a
+        real length and can be exhausted; infinite ones cannot.
+        """
+        return isinstance(getattr(self.loader, "dataset", None), IterableDataset)
+
+    def _epoch_batches(self):
+        """Yield one epoch's batches (already on ``self.device``).
+
+        * infinite source -> a fixed ``steps_per_epoch`` batches (re-wrapping the
+          endless stream), since there is no dataset to "pass over";
+        * finite source   -> a single full pass over the loader (a true epoch),
+          so the model sees every example once per epoch.
+        """
+        if self._is_infinite_loader():
+            for _ in range(self.steps_per_epoch):
+                yield self._next_batch()
+        else:
+            for batch in self.loader:
+                yield batch.to(self.device)
+
     def train(self) -> Dict[str, list]:
         history: Dict[str, list] = defaultdict(list)
         for epoch in range(self.epochs):
             self.model.train()
             running: Dict[str, float] = defaultdict(float)
-            for _ in range(self.steps_per_epoch):
-                x = self._next_batch()
+            n_steps = 0
+            for x in self._epoch_batches():
                 self.optimizer.zero_grad()
                 loss, metrics = self.train_step(x)
                 loss.backward()
@@ -79,8 +103,9 @@ class BaseTrainer:
                 running["loss"] += loss.item()
                 for k, v in metrics.items():
                     running[k] += float(v)
+                n_steps += 1
             for k in running:
-                running[k] /= self.steps_per_epoch
+                running[k] /= max(n_steps, 1)
                 history[k].append(running[k])
             if self.scheduler is not None:
                 self.scheduler.step()

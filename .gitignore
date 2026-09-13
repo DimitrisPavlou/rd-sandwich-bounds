@@ -5,7 +5,7 @@ build/
 dist/
 .pytest_cache/
 checkpoints/
-results/
+!results/*.png
 data/*.npy
 data/*.npz
 data/*.png
@@ -13,3 +13,4 @@ data/*.jpg
 !data/.gitkeep
 .venv/
 *.pt
+data/

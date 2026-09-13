@@ -47,7 +47,8 @@ class MADE(nn.Module):
         sizes = [dim] + list(hidden_units)
         for i in range(len(hidden_units)):
             layers.append(MaskedLinear(sizes[i], sizes[i + 1], masks[i]))
-            layers.append(nn.ReLU())
+            #layers.append(nn.ReLU())
+            layers.append(nn.Softplus())
         # output layer: 2*dim outputs (shift, log_scale), masked by the last mask repeated twice
         out_mask = masks[-1]
         self.hidden = nn.Sequential(*layers)

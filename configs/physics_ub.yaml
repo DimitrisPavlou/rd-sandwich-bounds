@@ -1,0 +1,54 @@
+# R-D UPPER BOUND sweep on the n=16 particle-physics source (paper Sec. 6.2 / Fig. 2b),
+# the ppzee data from Howard et al. (2021). A beta-VAE with a MAF prior, sweeping lambda.
+# Mirrors the AUTHORS' actual command:
+#
+#   parallel -j1 python rdub_mlp.py -V --checkpoint_dir checkpoints/physics \
+#     --dataset data/physics/ppzee-split=train.npy --data_dim 16 --latent_dim 16 \
+#     --prior_type maf --maf_stacks 3 --posterior_type gaussian \
+#     --encoder_units 500,500 --decoder_units 500,500 \
+#     --encoder_activation softplus --decoder_activation softplus \
+#     --ar_hidden_units 50,50 --ar_activation softplus --nats \
+#     --lambda {} train --epochs 100 --steps_per_epoch 1000 --lr 5e-4 \
+#     --batchsize 512 --max_validation_steps 20 ::: 100 300 1000 3000 10000 30000
+#
+# NOTE: the raw ppzee features have tiny per-dimension variance (~0.0025), so the RD
+# trade-off only becomes non-degenerate at LARGE lambda -- hence 100..30000, not the
+# 0.001..10 range from experiments/physics_and_speech.sh (which collapses every run to
+# rate=0). The authors do NOT standardize the data; large lambda is what escapes collapse.
+#
+# Two of the authors' flags are not ported and have no counterpart here:
+#   --ar_activation softplus  : MADE (rdsandwich/models/flows.py) uses a fixed activation.
+#   --max_validation_steps 20 : this port has no validation loop.
+# Also note: 'train' is a positional subcommand in the original rdub_mlp.py; this port is
+# flat-flag (see train/train_rdub.py), so it is not needed.
+#
+# Run it with:  python scripts/run_sweep.py --config configs/physics_ub.yaml
+# (add --dry-run to preview the 6 commands, or -j N to run N at a time)
+
+script: train_rdub
+
+# Flags identical across every run.
+fixed:
+  dataset: data/physics/ppzee-split=train.npy   # .npy path -> ArraySource (get_source)
+  data_dim: 16
+  latent_dim: 16             # Z != Y: a decoder is present (decoder_units below)
+  checkpoint_dir: checkpoints/physics
+  prior_type: maf            # masked autoregressive flow prior
+  maf_stacks: 3
+  ar_hidden_units: [50, 50]  # MADE hidden widths inside each MAF stack (authors: 50,50)
+  posterior_type: gaussian
+  encoder_units: [500, 500]
+  decoder_units: [500, 500]
+  encoder_activation: softplus
+  decoder_activation: softplus
+  nats: true                 # report rate in nats (per sample, not per dimension)
+  epochs: 100                # physics is a FINITE dataset, so each epoch is one full
+                             # pass over it (~321699/512 = 628 steps); steps_per_epoch
+                             # is ignored for finite sources (see BaseTrainer._epoch_batches).
+  lr: 5.0e-4                 # note: write 5.0e-4, not 5e-4 (YAML parses 5e-4 as a string)
+  batchsize: 512
+  verbose: true
+
+# Flags to vary. run_sweep.py runs the Cartesian product: 6 lambda values = 6 runs.
+sweep:
+  lambda: [100, 300, 1000, 3000, 10000, 30000]
