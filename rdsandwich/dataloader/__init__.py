@@ -23,10 +23,11 @@ __all__ = [
 
 # Image loading pulls in Pillow/torchvision; keep it optional.
 try:  # pragma: no cover - exercised only when the image deps are installed
-    from .image import ImageFolderSource
-    __all__.append("ImageFolderSource")
+    from .image import ImageFolderSource, ImagePatchDataset
+    __all__ += ["ImageFolderSource", "ImagePatchDataset"]
 except ImportError:  # pragma: no cover
     ImageFolderSource = None
+    ImagePatchDataset = None
 
 
 def get_source(

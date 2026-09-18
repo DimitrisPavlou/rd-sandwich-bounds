@@ -1,0 +1,76 @@
+# =============================================================================
+# TEMPLATE: R-D LOWER BOUND (log-u network)  ->  train/train_rdlb.py
+# =============================================================================
+# Experiments that use this script: gaussian_lb, physics_lb.
+#
+# DOCUMENTATION template: lists EVERY flag accepted by train/train_rdlb.py with
+# (type, default) and a one-line description. The script has two modes selected by
+# `command`: "train" (train the log-u model, optionally auto-eval) and "eval"
+# (re-evaluate an existing checkpoint with the exhaustive optimizer). Flags used
+# only by one mode are tagged [train] / [eval].
+#
+# Run:   python scripts/run_sweep.py --config configs/templated/train_rdlb.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Convention: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b ;
+#             write learning rates as 5.0e-4, NOT 5e-4 (YAML would parse it as a string).
+# =============================================================================
+
+script: train_rdlb
+
+fixed:
+  # --- run / bookkeeping ---
+  verbose: true                 # (bool, false)  -V, print progress.
+  seed: 0                       # (int, 0)  RNG seed.
+  checkpoint_dir: checkpoints/rdlb_template   # (str, ./checkpoints)  run dir + checkpoints.
+  # device: cuda                # (str, null)  force device; null = auto-detect.
+  # chunksize: null             # (int, null)  optional chunking of the C_k computation to cap memory.
+
+  # --- data source ---
+  data_dim: 16                  # (int, REQUIRED)  ambient/source dimension n of X.
+  dataset: gaussian             # (str, REQUIRED)  "gaussian" (standard N(0,I)), or a path to a .npy array.
+  # gparams_path: null          # (str, null)  fixed non-standard Gaussian params .npz; omit for standard N(0,I).
+  in_channels: 3                # (int, 3)  input channels for the CONV log-u model (image sources only).
+
+  # --- log-u network (the function g/u being maximized) ---
+  lamb: 100.0                   # (float, REQUIRED)  slope -lambda of the tangent line. SWEPT below.
+  model: mlp                    # (str, mlp)  log-u architecture: "mlp" (or a conv variant for images).
+  units: [200, 200, 200]        # (list[int], [])  MLP hidden widths. Leave [] to auto-size from data_dim below.
+  hidden_units_per_dim: 0       # (int, 0)  if >0 AND units is [], build num_hidden_layers layers of
+                                #           (hidden_units_per_dim * data_dim) units (paper A.5.2 uses 20 => 20n).
+  num_hidden_layers: 2          # (int, 2)  number of hidden layers when auto-sizing via hidden_units_per_dim.
+  activation: selu              # (str, selu)  activation of the log-u MLP.
+  # kernel_dims: []             # (list[int], [])  conv kernel sizes for the image/conv log-u model.
+
+  command: train                # (str, train)  "train" or "eval".
+
+  # --- C_k / inner y-optimizer knobs (shared by train and eval) ---
+  batchsize: 2048               # (int, 1024)  -k, the number of samples k in the C_k estimator.
+  num_Ck_samples: 2             # (int, 1)  -M, number of C_k draws averaged per step.
+  y_init: quick                 # (str, quick)  inner-optimizer init: "quick" (fast, training) or
+                                #               "exhaustive" (global, required for a correct eval).
+  y_quick_topn: 3               # (int, 10)  candidates kept by the "quick" initializer.
+  y_steps: 500                  # (int, 500)  inner-optimization steps for y.
+  y_tol: 1.0e-6                 # (float, 1.0e-6)  inner-optimization convergence tolerance.
+  y_lr: 1.0e-2                  # (float, 1.0e-2)  inner-optimization learning rate for y.
+  y_sequential: false           # (bool, false)  false = vectorized inner optimizer (fast on GPU, default);
+                                #                 true = per-candidate sequential loop (image-case fallback).
+  # cand_chunk: 512             # (int, null)  vectorized only: process P candidates in chunks to cap the
+                                #              [P, k, *dims] peak memory (use on high-dim / image data).
+
+  # --- training-only ---
+  lr: 5.0e-4                    # (float, 1.0e-4)  [train] Adam LR for the log-u network.
+  last_step: 4000               # (int, 3000)  [train] total training steps.
+  checkpoint_interval: 2000     # (int, 1000)  [train] steps between checkpoints.
+  beta: 0.2                     # (float, 0.2)  [train] linearization parameter of the -log E[C_k] objective.
+  log_E_Ck_max_delta: 1.0       # (float, 1.0)  [train] clamp on the per-step change of log E[C_k] (stability).
+  eval_after: true              # (bool, false)  [train] after training, run the EXHAUSTIVE eval -> rd-*.npz.
+  eval_num_Ck_samples: 5        # (int, 5)  [train] M used by that post-training eval.
+
+  # --- eval-only ---
+  # ckpt: path/to/ckpt.pt       # (str, null)  [eval] checkpoint to evaluate (REQUIRED when command: eval,
+                                #              which also requires y_init: exhaustive).
+
+sweep:
+  lamb: [100, 300, 1000, 3000, 10000, 30000]
+  # data_dim: [2, 4, 8, 16]     # e.g. the gaussian_lb increasing-dimension sweep (with hidden_units_per_dim: 20).

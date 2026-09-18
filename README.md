@@ -30,9 +30,12 @@ pytest tests/ -q
 ```
 rdsandwich/                  installable package
   models/                    generic neural-network classes only
-    mlp.py                   make_mlp / get_activation / GDN
+    mlp.py                   make_mlp / get_activation (re-exports GDN)
+    gdn.py                   GDN/IGDN + NonNegativeParameterizer (tfc-faithful)
     conv.py                  get_convnet (lower-bound image log-u model)
     flows.py                 MADE-based Masked Autoregressive Flow (flow prior)
+    deep_factorized.py       Ballé-2018 deep factorized density (image hyperprior)
+    channelwise_ar.py        channel-wise autoregressive (IAF) transform
   dataloader/                data sources + the DataLoader factory
     base.py                  Source, build_loader, InfiniteBatchDataset
     gaussian.py              Gaussian source, analytical R(D), param generator
@@ -42,7 +45,7 @@ rdsandwich/                  installable package
   utils/                     shared infrastructure + classical approaches
     io.py                    jsonl logging, checkpointing, run-naming
     torch_utils.py           seeding, device, numeric helpers
-    trainer.py               BaseTrainer (the shared training loop)
+    trainer.py               BaseTrainer + WarmupReduceLROnPlateau (AMP, grad clip, resume)
     ba.py                    Blahut-Arimoto reference algorithm
   upper_bound/               R-D UPPER BOUND
     config.py                RDUBConfig
@@ -53,8 +56,9 @@ rdsandwich/                  installable package
     model.py                 build_log_u_model (log-u network factory)
     algorithm.py             batch_mse / compute_Ck_obj / optimize_y (C_k estimator)
     trainer.py               LowerBoundTrainer (overrides train()) + est_R_ evaluator
-  resnet_vae.py              hierarchical conv-VAE for image UB (pending)
-  compression_baselines.py   CompressAI mbt2018 / ms2020 baselines (pending)
+  resnet_vae.py              hierarchical ResNet-VAE for image UB (bidirectional inference)
+  ms2020_vae.py              Minnen&Singh-2020 beta-VAE for image UB (channel-AR prior)
+  compression_baselines.py   CompressAI mbt2018 / ms2020 baselines (pending; to be replaced by downloaded curves)
   biggan.py                  BigGAN-backed GAN-image source (pending)
   config.py                  YAML sweep loader (expand_sweep / params_to_argv)
 train/                       training CLIs (train_rdub / train_rdlb / train_resnet_vae)
@@ -84,8 +88,9 @@ tests/                       pytest suite
 | `ntc_sources.py` | `rdsandwich/dataloader/` | `get_banana`/`get_nd_banana` -> `BananaSource`/`NdBananaEmbedder` (in `banana.py`), reproducing the same sequence of (inverted) transforms; `build_loader` turns any source into a `DataLoader`. |
 | `gen_gaussian_params.py` | `scripts/gen_gaussian_params.py` | Direct port. |
 | `prepare_imgs.py` | `scripts/prepare_imgs.py` | Direct port (Pillow instead of `tf.image`). |
-| `resnet_vae.py` | `rdsandwich/resnet_vae.py`, `train/train_resnet_vae.py` | **Simplified port** — a ladder-VAE with the same level structure (strided-conv downsampling, per-level factorized-Gaussian posterior, optional MAF on the flattened top latent for `--flat_z0`) but *not* the original's full bidirectional-inference pass or channel-wise-autoregressive hyperprior. Good for reproducing the qualitative R-D upper bound shape on GAN images at moderate scale; for a bit-exact match to the paper's Kodak/Tecnick numbers, extend this scaffold with the bidirectional inference pass level-by-level. |
-| `mbt2018.py`, `ms2020.py`, `biggan.py` | `rdsandwich/compression_baselines.py`, `rdsandwich/biggan.py` | **Not re-derived from scratch.** These wrap [CompressAI](https://github.com/InterDigitalInc/CompressAI) (PyTorch reference implementations of Minnen et al. 2018 and Minnen & Singh 2020) and `pytorch-pretrained-biggan` (a PyTorch port of the same DeepMind BigGAN-deep-128 weights used in the original TF-Hub-based script). Re-deriving two full published architectures from the TF source would dominate the porting effort for no scientific benefit over using their standard, maintained PyTorch reference implementations. |
+| `resnet_vae.py` | `rdsandwich/resnet_vae.py`, `train/train_resnet_vae.py` | **Full port.** A hierarchical ResNet-VAE with GDN residual encoder/decoder blocks (Cheng et al. 2020), true **bidirectional inference** at each `LatentBlock` (bottom-up + top-down posterior, optionally parameterized relative to the prior), a **channel-wise autoregressive (IAF) prior** on the bottom `--ar_prior_levels` generative levels, and a per-channel **deep factorized** prior on the top latent `z0` (or a flattened MAF with `--flat_z0`, for the GAN experiments). This is the `dim(Z) ≈ 0.66 dim(X)` model of Sec. 6.3/6.4. |
+| `ms2020.py` (β-VAE variant) | `rdsandwich/ms2020_vae.py` | **Ported architecture, β-VAE recipe.** The Minnen & Singh 2020 channel-autoregressive autoencoder (analysis/synthesis/hyper transforms per Ballé 2018 Table 1, 10 channel slices with LRP), converted to an R-D **upper-bound** β-VAE per the paper's App. A.5.7: factorized-Gaussian posteriors with learned means/variances, a deep factorized hyperprior **not** convolved with a uniform, and a Gaussian channel-conditional prior. The authors' public repo ships only the *operational* `ms2020.py` (rounding/entropy-coded, used as a baseline); the β-VAE upper-bound variant (`rdub-model=ms2020_vae`) had no released code, so this is reconstructed from the architecture + paper. |
+| `mbt2018.py`, `ms2020.py` (operational baselines), `biggan.py` | `rdsandwich/compression_baselines.py`, `rdsandwich/biggan.py` | **Baseline comparison curves are not retrained.** The operational Q-R curves (Minnen 2018/2020, VTM, BPG, JPEG2000, …) in Fig. 3 are published numbers; they will be downloaded from the `tensorflow/compression` and CompressAI results directories rather than retrained (Phase 0 — replacing `compression_baselines.py`). `biggan.py` (GAN-image source for Sec. 6.3) still wraps `pytorch-pretrained-biggan`. |
 | `boilerplate.py` | — | Keras-training-loop plumbing (LR schedules, callbacks); superseded by `rdsandwich/utils/trainer.py`'s `BaseTrainer` and the per-bound trainer subclasses. |
 | `utils.py` | `rdsandwich/utils/` (`io.py`, `torch_utils.py`) | jsonl logging (`get_json_logging_callback` -> `JsonlLogger`), `config_dict_to_str`, checkpoint helpers replacing `model.save_weights`/`load_weights`; re-exported from `rdsandwich.utils`. |
 

@@ -18,7 +18,7 @@ from PIL import Image
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("glob_pattern")
-    p.add_argument("out_dir")
+    p.add_argument("--out_dir")
     p.add_argument("--min_size", type=int, default=512)
     p.add_argument("--min_scale", type=float, default=0.6)
     p.add_argument("--max_scale", type=float, default=1.0)

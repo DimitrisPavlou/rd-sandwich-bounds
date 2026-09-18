@@ -1,0 +1,52 @@
+# =============================================================================
+# TEMPLATE: IMAGE R-D UPPER BOUND, ResNet-VAE (train-only CLI)  ->  train/train_resnet_vae.py
+# =============================================================================
+# Experiments that use this script: the GAN-image sandwich (paper Sec. 6.3,
+# basenji BigGAN source, d=2 / d=4), and small natural-image ResNet-VAE runs.
+#
+# This is the ORIGINAL, minimal ResNet-VAE trainer (sample-based loop, no
+# eval/AMP/compile/resume). For the FULL natural-image pipeline (Kodak/Tecnick
+# eval, AMP, torch.compile, resumable checkpoints, and the ms2020 model) use
+# train_image_ub.template.yaml instead.
+#
+# DOCUMENTATION template: lists EVERY flag accepted by train/train_resnet_vae.py.
+#
+# Run:   python scripts/run_sweep.py --config configs/templated/train_resnet_vae.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Convention: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b ;
+#             write learning rates as 1.0e-4, NOT 1e-4 (YAML would parse it as a string).
+# =============================================================================
+
+script: train_resnet_vae
+
+fixed:
+  # --- run / bookkeeping ---
+  verbose: true                 # (bool, false)  -V, print per-epoch metrics.
+  seed: 0                       # (int, 0)  RNG seed.
+  checkpoint_dir: checkpoints/gan   # (str, ./checkpoints)  run dir + checkpoints.
+  # device: cuda                # (str, null)  force device; null = auto-detect.
+
+  # --- data source ---
+  dataset: basenji              # (str, REQUIRED)  an image folder / glob, OR "basenji" for the BigGAN source
+                                #                  (needs: pip install pytorch-pretrained-biggan).
+  data_dim: 4                   # (int, null)  INTRINSIC dimension d of the BigGAN source (Sec. 6.3, e.g. 2 or 4);
+                                #              only used when dataset: basenji. SWEPT below.
+  img_dim: 128                  # (int, 128)  square image / patch size fed to the model.
+
+  # --- architecture (rdsandwich/resnet_vae.py) ---
+  latent_channels: [4, 8, 16, 32, 64, 128]   # (list[int], [4,8,16,32,64,128])  per-level latent channel widths
+                                #                                 (its length = number of latent levels).
+  num_filters: 256              # (int, 256)  base conv width.
+  flat_z0: false                # (bool, false)  use a flat (non-spatial) top latent z0.
+
+  # --- objective / optimization ---
+  lambda: 1.0e-4                # (float, 1.0e-4)  R-D Lagrange multiplier (slope). SWEPT below.
+  batchsize: 8                  # (int, 8)  images per step.
+  lr: 1.0e-4                    # (float, 1.0e-4)  Adam learning rate.
+  epochs: 600                   # (int, 100)  number of (sample-based) epochs.
+  steps_per_epoch: 1000         # (int, 1000)  optimization steps per epoch (source is sampled each step).
+
+sweep:
+  data_dim: [2, 4]              # the Sec. 6.3 intrinsic-dimension sweep.
+  lambda: [1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3, 1.0e-2]

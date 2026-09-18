@@ -1,0 +1,85 @@
+# =============================================================================
+# TEMPLATE: NATURAL-IMAGE R-D UPPER BOUND (full pipeline)  ->  train/train_image_ub.py
+# =============================================================================
+# Experiments that use this script:
+#   natural_images_resnet_vae_train / _eval   (model: resnet_vae)
+#   natural_images_ms2020_vae_train  / _eval   (model: ms2020_vae)
+#
+# This CLI has TWO axes that select which flags matter:
+#   * model:   resnet_vae | ms2020_vae   -> architecture flags differ.
+#   * command: train | eval              -> optimization vs full-image evaluation.
+# Every flag below is a REAL argparse option, so leaving an irrelevant one in is
+# harmless (it is simply ignored for that model/command). Flags are tagged
+# [shared] / [resnet_vae] / [ms2020_vae] / [train] / [eval] so you can see which
+# apply. The active values here show a `model: resnet_vae, command: train` run;
+# for the other combinations, flip those two and read the matching tags.
+#
+# Run:   python scripts/run_sweep.py --config configs/templated/train_image_ub.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Convention: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b ;
+#             write learning rates as 1.0e-4, NOT 1e-4 (YAML would parse it as a string).
+# =============================================================================
+
+script: train_image_ub
+
+fixed:
+  # --- selectors (REQUIRED) ---
+  model: resnet_vae             # (str, REQUIRED)  resnet_vae | ms2020_vae.
+  command: train                # (str, REQUIRED)  train | eval.
+
+  # --- run / bookkeeping [shared] ---
+  dataset: data/my_coco_train2017   # (str, REQUIRED)  train: COCO image folder; eval: Kodak/Tecnick folder.
+  checkpoint_dir: checkpoints/img_compression   # (str, checkpoints/img_compression)  run dirs + checkpoints.
+  results_dir: results/img_compression          # (str, results/img_compression)  [eval] where .npz results go.
+  lambda: 0.01                  # (float, 0.01)  R-D Lagrange multiplier (slope). SWEPT below.
+                                #                (also selects the checkpoint at eval time.)
+  seed: 0                       # (int, 0)  RNG seed.
+  # device: cuda                # (str, null)  force device; null = auto-detect.
+  verbose: true                 # (bool, false)  -V, print per-epoch metrics.
+
+  # --- architecture, shared ---
+  num_filters: 256              # (int, 256)  [shared] base conv width (paper: 256 resnet_vae / 192 ms2020).
+
+  # --- architecture, ResNet-VAE only ---
+  latent_channels: [4, 8, 16, 32, 64, 128]   # (list[int], [4,8,16,32,64,128])  [resnet_vae] per-level latent
+                                #                                 widths; 2**len(list) = total downsample factor.
+  ar_prior_levels: 4            # (int, 4)   [resnet_vae] number of autoregressive prior levels.
+  ar_slices: 8                  # (int, 8)   [resnet_vae] channel-AR slices in the prior.
+  flat_z0: false                # (bool, false)  [resnet_vae] flat (non-spatial) top latent z0.
+  maf_units: [32, 16]           # (list[int], [32,16])  [resnet_vae] MADE hidden widths in the MAF prior.
+  maf_stacks: 3                 # (int, 3)   [resnet_vae] number of MAF flow stacks.
+
+  # --- architecture, Minnen & Singh 2020 only ---
+  latent_depth: 320             # (int, 320)  [ms2020_vae] latent channels (200 ~= paper's dim(Z)=0.28 dim(X);
+                                #             must stay divisible by num_slices).
+  hyperprior_depth: 192         # (int, 192)  [ms2020_vae] hyperprior channels.
+  num_slices: 10                # (int, 10)   [ms2020_vae] channel-AR slices.
+  max_support_slices: 5         # (int, 5)    [ms2020_vae] max previous slices each slice conditions on.
+
+  # --- optimization [train] ---
+  patchsize: 256                # (int, 256)  [train] random-crop size (also the model's working resolution).
+  batchsize: 16                 # (int, 8)    [shared] images per batch (eval forces 1 full image at a time).
+  num_workers: 10               # (int, 4)    [train] DataLoader worker processes.
+  # max_images: null            # (int, null) [train] cap #training images (e.g. for smoke tests); null = all.
+  lr: 1.0e-4                    # (float, 1.0e-4)  [train] Adam LR (paper value at batch 8).
+  epochs: 2000                  # (int, 600)  [train] full passes over the dataset (every image once per epoch).
+  warmup: 1200                  # (int, 400)  [train] epochs of constant LR before ReduceLROnPlateau engages.
+  patience: 60                  # (int, 20)   [train] epochs without improvement before the LR is halved.
+  # grad_clip: null             # (float, null) [train] global grad-norm clip; null = off (paper used none).
+  amp: true                     # (bool, false)  [train] mixed-precision (fp16 autocast + grad scaler).
+  compile: true                 # (bool, false)  [train] torch.compile the model (first step compiles ~1-2 min).
+  channels_last: false          # (bool, false)  [train] channels_last memory format (helps tensor-core GPUs).
+  checkpoint_interval: 25       # (int, 10)   [train] epochs between checkpoints (small = more resumable).
+  resume: false                 # (bool, false)  [train] resume from the newest checkpoint in the run dir.
+
+  # --- evaluation [eval] ---
+  # ckpt: path/to/ckpt.pt       # (str, null) [eval] explicit checkpoint; null = newest in the run dir.
+  # no_cast_xhat: false         # (bool, false) [eval] do NOT round the reconstruction to uint8 (clip only) --
+                                #                for continuous sources.
+
+sweep:
+  lambda: [0.005, 0.01, 0.02, 0.04, 0.08, 0.16]
+  # dataset:                    # e.g. the eval-set sweep (command: eval):
+  #   - data/kodak
+  #   - data/Tecnick_TESTIMAGES/RGB/RGB_OR_1200x1200

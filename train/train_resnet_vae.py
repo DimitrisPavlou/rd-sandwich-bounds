@@ -32,7 +32,8 @@ def get_source(args, device):
         from rdsandwich.biggan import BigGANSource
         return BigGANSource(args.dataset, intrinsic_dim=args.data_dim, device=device)
     from rdsandwich.dataloader import ImageFolderSource
-    return ImageFolderSource(args.dataset, patchsize=args.img_dim, device=device)
+    return ImageFolderSource(args.dataset, patchsize=args.img_dim, device=device,
+                             preload=getattr(args, "preload", False))
 
 
 def main():
@@ -54,6 +55,9 @@ def main():
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--epochs", type=int, default=100)
     p.add_argument("--steps_per_epoch", type=int, default=1000)
+    p.add_argument("--preload", action="store_true",
+                   help="Decode all images into RAM (uint8) once so sample() crops from "
+                        "memory instead of re-decoding from disk every step.")
     args = p.parse_args()
 
     seed_everything(args.seed)

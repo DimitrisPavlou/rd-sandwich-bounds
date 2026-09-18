@@ -24,11 +24,11 @@ from .torch_utils import (
     seed_everything,
     upper_bound,
 )
-from .trainer import BaseTrainer
+from .trainer import BaseTrainer, WarmupReduceLROnPlateau
 
 __all__ = [
     "JsonlLogger", "MyJSONEncoder", "config_dict_to_str", "get_time_str",
     "latest_checkpoint", "load_checkpoint", "parse_lamb", "preprocess_float_dict",
     "save_checkpoint", "SOFTPLUS_INV_1", "ema_update", "get_device", "lower_bound",
-    "seed_everything", "upper_bound", "BaseTrainer",
+    "seed_everything", "upper_bound", "BaseTrainer", "WarmupReduceLROnPlateau",
 ]

@@ -1,0 +1,67 @@
+# =============================================================================
+# TEMPLATE: R-D UPPER BOUND (beta-VAE)  ->  train/train_rdub.py
+# =============================================================================
+# Experiments that use this script: gaussian_ub, gaussian_ub_zy, physics_ub.
+#
+# This is a DOCUMENTATION template: it lists EVERY flag accepted by
+# train/train_rdub.py, with (type, default) and a one-line description. Copy it,
+# delete the flags you do not need, and move the ones you want to vary into the
+# `sweep:` block.
+#
+# Run:   python scripts/run_sweep.py --config configs/templated/train_rdub.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Convention (rdsandwich/config.py -> params_to_argv):
+#   * bool true  -> bare --flag ; bool false / null -> flag omitted (store_true args)
+#   * list [a,b] -> --flag a,b
+#   * scalar     -> --flag <value>
+#   * YAML gotcha: write learning rates as 5.0e-4, NOT 5e-4 (5e-4 parses as a string).
+# =============================================================================
+
+script: train_rdub
+
+# Flags identical across every run in the sweep.
+fixed:
+  # --- run / bookkeeping ---
+  seed: 0                       # (int, 0)     RNG seed for torch/numpy/python.
+  checkpoint_dir: checkpoints/rdub_template   # (str, ./checkpoints) where run dirs + checkpoints are written.
+  # device: cuda                # (str, null)  force a device ("cuda"/"cuda:1"/"cpu"); null = auto-detect.
+
+  # --- data source ---
+  data_dim: 16                  # (int, REQUIRED)  ambient/source dimension n of X.
+  dataset: gaussian             # (str, "gaussian")  "gaussian", or a path to a .npy array (ArraySource).
+  # gparams_path: data/gaussian/gaussian_params-dim=16.npz
+                                # (str, null)  fixed non-standard Gaussian params .npz; omit for a
+                                #              STANDARD N(0,I) source or for a .npy dataset.
+
+  # --- encoder / decoder (MLP amortized inference + decoder omega) ---
+  encoder_units: [500, 500]     # (list[int], [])  encoder hidden widths; [] = linear encoder.
+  decoder_units: [500, 500]     # (list[int], [])  decoder hidden widths; [] = NO decoder => Z=Y
+                                #                   (latent_dim is then forced to data_dim).
+  encoder_activation: softplus  # (str, softplus)  e.g. softplus | leaky_relu | none.
+  decoder_activation: softplus  # (str, softplus)  e.g. softplus | leaky_relu | none.
+  latent_dim: 16                # (int, null)  dimension of the latent Z (ignored/overwritten when Z=Y).
+
+  # --- variational distributions ---
+  posterior_type: gaussian      # (str, gaussian)  form of Q(Z|X).
+  prior_type: maf               # (str, std_gaussian)  prior Q(Z): std_gaussian | gmm_1 | maf | ...
+  ar_hidden_units: [50, 50]     # (list[int], [10,10])  MADE hidden widths inside each MAF stack.
+  maf_stacks: 3                 # (int, 0)  number of MAF flow stacks in the prior (0 = no flow).
+
+  # --- objective / reporting ---
+  lambda: 100.0                 # (float, 0.01)  R-D Lagrange multiplier (slope). SWEPT below.
+  rpd: false                    # (bool, false)  report rate PER DIMENSION.
+  nats: true                    # (bool, false)  report rate in NATS (per sample). rpd/nats are the two
+                                #                 reporting modes; pick at most one.
+
+  # --- optimization ---
+  batchsize: 512                # (int, 1024)  samples per step.
+  lr: 5.0e-4                    # (float, 1.0e-3)  Adam learning rate.
+  epochs: 100                   # (int, 100)  full passes (finite source) or logical epochs (infinite source).
+  steps_per_epoch: 1000         # (int, 1000)  steps/epoch; IGNORED for finite datasets (one full pass instead).
+  verbose: true                 # (bool, false)  -V, print per-epoch metrics.
+
+# Flags to vary; run_sweep.py runs the Cartesian product of these lists.
+sweep:
+  lambda: [100, 300, 1000, 3000, 10000, 30000]
+  # latent_dim: [400, 600, 800]   # e.g. the gaussian_ub latent-dim sweep.

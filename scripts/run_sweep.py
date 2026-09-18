@@ -32,7 +32,7 @@ REPO_ROOT = os.path.dirname(SCRIPTS_DIR)
 TRAIN_DIR = os.path.join(REPO_ROOT, "train")
 # CLIs whose arguments are all top-level flags (no argparse sub-commands), so a
 # flat params dict maps cleanly onto argv.
-ALLOWED_SCRIPTS = {"train_rdub", "train_rdlb", "train_resnet_vae"}
+ALLOWED_SCRIPTS = {"train_rdub", "train_rdlb", "train_resnet_vae", "train_image_ub"}
 
 
 def build_commands(config, config_path):

@@ -1,4 +1,8 @@
-"""MLP / activation / GDN building blocks (ported from ``nn_models.py``)."""
+"""MLP / activation building blocks (ported from ``nn_models.py``).
+
+``GDN`` lives in :mod:`rdsandwich.models.gdn` and is re-exported here for
+backward compatibility.
+"""
 from __future__ import annotations
 
 from typing import List, Optional, Sequence
@@ -7,33 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-class GDN(nn.Module):
-    """Generalized Divisive Normalization, y_i = x_i / sqrt(beta_i + sum_j gamma_ij x_j^2).
-
-    A lightweight PyTorch port of tfc.GDN (Ballé et al.) sufficient for
-    small MLP/CNN heads; not fused/optimized like tensorflow-compression's
-    version. Set ``inverse=True`` to get IGDN, y_i = x_i * sqrt(beta_i + ...).
-    """
-
-    def __init__(self, num_channels: int, inverse: bool = False, eps: float = 1e-6):
-        super().__init__()
-        self.inverse = inverse
-        self.eps = eps
-        self.beta = nn.Parameter(torch.ones(num_channels))
-        self.gamma = nn.Parameter(0.1 * torch.eye(num_channels))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [..., C] for MLP-style usage, or [B, C, H, W] for conv usage.
-        if x.dim() == 2:  # [B, C]
-            beta = F.softplus(self.beta) + self.eps
-            gamma = F.softplus(self.gamma)
-            norm = torch.sqrt(F.linear(x * x, gamma) + beta)
-        else:  # [B, C, H, W]
-            beta = (F.softplus(self.beta) + self.eps).view(1, -1, 1, 1)
-            gamma = F.softplus(self.gamma).view(self.gamma.shape[0], self.gamma.shape[1], 1, 1)
-            norm = torch.sqrt(F.conv2d(x * x, gamma) + beta)
-        return x * norm if self.inverse else x / norm
+from .gdn import GDN
 
 
 def get_activation(name: Optional[str], num_channels: Optional[int] = None) -> Optional[nn.Module]:
