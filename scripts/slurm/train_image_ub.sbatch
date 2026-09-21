@@ -13,7 +13,8 @@
 
 #SBATCH --job-name=rdub_resnetvae
 #SBATCH --partition=hopper_gpu      # Nvidia H100 (test/debug: ampere_gpu A100, or -M anansi -p ada_gpu)
-#SBATCH --array=0-5                 # one task per lambda (6 values)
+#SBATCH --array=0-5%2               # all 6 lambdas, but at most 2 running at once (%2):
+                                    #   3 sequential waves of 2 GPUs each. Drop %2 to run all 6 at once.
 #SBATCH --gres=gpu:1                # 1 GPU per task
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16          # >= num_workers (10); memory scales with cores
@@ -32,7 +33,7 @@ cd "$VSC_SCRATCH/rd-sandwich-bounds"     # repo root, where train/ and data/ liv
 mkdir -p logs
 
 # --- lambda sweep (matches the YAML 'sweep' block) ---------------------------
-LAMBDAS=(0.005 0.01) # 0.02 0.04 0.08 0.16)
+LAMBDAS=(0.005 0.01 0.02 0.04 0.08 0.16)   # must cover every index in --array above
 LAMBDA="${LAMBDAS[$SLURM_ARRAY_TASK_ID]}"
 
 # --- sanity checks -----------------------------------------------------------
