@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from collections import defaultdict
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -189,6 +190,7 @@ class BaseTrainer:
     def train(self) -> Dict[str, list]:
         history: Dict[str, list] = defaultdict(list)
         for epoch in range(self.start_epoch, self.epochs):
+            epoch_start = time.perf_counter()
             self.model.train()
             running: Dict[str, float] = defaultdict(float)
             n_steps = 0
@@ -226,9 +228,12 @@ class BaseTrainer:
                                             running.get(self.monitor, running.get("loss", math.inf)))
             self._scheduler_step(monitor_value)
 
+            epoch_time = time.perf_counter() - epoch_start
             if self.verbose:
                 summary = " ".join(f"{k}={v:.5g}" for k, v in {**running, **val_metrics}.items())
-                print(f"epoch {epoch}: {summary}")
+                sec_per_step = epoch_time / max(n_steps, 1)
+                print(f"epoch {epoch}: {summary} "
+                      f"time={epoch_time:.1f}s ({sec_per_step:.3f}s/step)")
             if self.logger:
                 self.logger.log({"epoch": epoch, **running, **val_metrics,
                                  "lr": self.optimizer.param_groups[0]["lr"]})
