@@ -32,7 +32,7 @@ cd "$VSC_SCRATCH/rd-sandwich-bounds"     # repo root, where train/ and data/ liv
 mkdir -p logs
 
 # --- lambda sweep (matches the YAML 'sweep' block) ---------------------------
-LAMBDAS=(0.005 0.01 0.02 0.04 0.08 0.16)
+LAMBDAS=(0.005 0.01) # 0.02 0.04 0.08 0.16)
 LAMBDA="${LAMBDAS[$SLURM_ARRAY_TASK_ID]}"
 
 # --- sanity checks -----------------------------------------------------------
