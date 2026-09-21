@@ -26,9 +26,9 @@ set -euo pipefail
 # --- environment (edit the two paths to match your setup) --------------------
 module load Miniconda3/23.9.0-0
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "$VSC_SCRATCH/your-conda-env"
+conda activate "$VSC_SCRATCH/.conda_envs/main"
 
-cd "$VSC_SCRATCH/your-code-dir"     # repo root, where train/ and data/ live
+cd "$VSC_SCRATCH/rd-sandwich-bounds"     # repo root, where train/ and data/ live
 mkdir -p logs
 
 # --- lambda sweep (matches the YAML 'sweep' block) ---------------------------
