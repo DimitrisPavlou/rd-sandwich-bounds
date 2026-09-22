@@ -229,14 +229,15 @@ class BaseTrainer:
             self._scheduler_step(monitor_value)
 
             epoch_time = time.perf_counter() - epoch_start
+            sec_per_step = epoch_time / max(n_steps, 1)
             if self.verbose:
                 summary = " ".join(f"{k}={v:.5g}" for k, v in {**running, **val_metrics}.items())
-                sec_per_step = epoch_time / max(n_steps, 1)
                 print(f"epoch {epoch}: {summary} "
                       f"time={epoch_time:.1f}s ({sec_per_step:.3f}s/step)")
             if self.logger:
                 self.logger.log({"epoch": epoch, **running, **val_metrics,
-                                 "lr": self.optimizer.param_groups[0]["lr"]})
+                                 "lr": self.optimizer.param_groups[0]["lr"],
+                                 "epoch_time": epoch_time, "sec_per_step": sec_per_step})
 
             if self.checkpoint_interval and self.ckpt_path and (epoch + 1) % self.checkpoint_interval == 0:
                 self._save(epoch, history)
