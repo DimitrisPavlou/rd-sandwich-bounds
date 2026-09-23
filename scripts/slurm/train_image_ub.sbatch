@@ -13,8 +13,8 @@
 
 #SBATCH --job-name=rdub_resnetvae
 #SBATCH --partition=hopper_gpu      # Nvidia H100 (test/debug: ampere_gpu A100, or -M anansi -p ada_gpu)
-#SBATCH --array=0-5%2               # all 6 lambdas, but at most 2 running at once (%2):
-                                    #   3 sequential waves of 2 GPUs each. Drop %2 to run all 6 at once.
+#SBATCH --array=5                   # only lambda=0.16 (index 5 in LAMBDAS below).
+                                    #   Full sweep: --array=0-5%2 (all 6, at most 2 running at once).
 #SBATCH --gres=gpu:1                # 1 GPU per task
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16          # >= num_workers (10); memory scales with cores
@@ -64,7 +64,6 @@ python train/train_image_ub.py \
   --lr 1.0e-4 \
   --lambda "$LAMBDA" \
   --verbose \
-  --amp \
   --compile \
   --preload \
   --resume
