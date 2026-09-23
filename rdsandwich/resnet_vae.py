@@ -169,9 +169,11 @@ class LatentBlock(nn.Module):
         if self.ar_prior:
             log_q = normal_log_prob(z, q_loc, q_scale).flatten(1).sum(-1)
             shift = self.ar_shift(z)
-            scale = torch.sigmoid(LOGIT_OFFSET + self.ar_scale(z))
+            # fp32 + logsigmoid: under fp16 autocast sigmoid underflows to 0 and log(0) = -inf.
+            raw_scale = LOGIT_OFFSET + self.ar_scale(z).float()
+            scale = torch.sigmoid(raw_scale)
             epsilon = scale * z + (1.0 - scale) * shift          # inverse AR transform z -> noise
-            log_det_J = torch.log(scale).flatten(1).sum(-1)
+            log_det_J = F.logsigmoid(raw_scale).flatten(1).sum(-1)
             log_p = normal_log_prob(epsilon, p_loc, p_scale).flatten(1).sum(-1) + log_det_J
             bits = (log_q - log_p) / LN2
         else:
