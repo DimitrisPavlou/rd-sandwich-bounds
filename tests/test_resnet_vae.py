@@ -71,3 +71,18 @@ def test_overfits_a_fixed_batch():
         if it == 0:
             first = out["mse"].item()
     assert out["mse"].item() < 0.2 * first  # distortion collapses on a memorizable batch
+
+
+def test_scale_floor_and_stats():
+    """Every latent scale respects cfg.scale_min; return_stats reports per-level summaries."""
+    from rdsandwich.resnet_vae import softplus_scale
+    assert softplus_scale(torch.tensor([-1e4]), 1e-5).item() == pytest.approx(1e-5)
+    m = ResNetVAE(_cfg(ar_prior_levels=2, ar_slices=4, scale_min=1e-3))
+    with torch.no_grad():
+        out = m(torch.rand(1, 3, 64, 64) * 255.0, return_stats=True)
+    stats = out["stats"]
+    assert set(f"level{i}" for i in range(4)) <= set(stats)
+    for i in range(4):
+        lv = stats[f"level{i}"]
+        assert lv["q_scale"]["min"] >= 1e-3 and lv["bits"]["nonfinite"] == 0
+    assert "ar_raw_scale" in stats["level3"]      # bottom levels use the AR prior

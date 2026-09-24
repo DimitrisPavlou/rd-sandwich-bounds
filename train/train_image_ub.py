@@ -59,6 +59,7 @@ def build_model(args):
             num_filters=args.num_filters, ar_prior_levels=args.ar_prior_levels,
             ar_slices=args.ar_slices, flat_z0=args.flat_z0,
             maf_units=args.maf_units, maf_stacks=args.maf_stacks, lmbda=args.lmbda,
+            scale_min=args.scale_min,
         )
         return ResNetVAE(cfg), 2 ** len(args.latent_channels)
     if args.model == "ms2020_vae":
@@ -167,11 +168,18 @@ def run_train(args, device):
         def checkpoint_extra(self):
             return {"cfg": vars(model.cfg), "model": args.model}
 
+        def diagnostic_forward(self, x):
+            # Eager (uncompiled) model so activation hooks fire; per-level latent stats.
+            if cl:
+                x = x.to(memory_format=torch.channels_last)
+            out = model(x, return_stats=True) if args.model == "resnet_vae" else model(x)
+            return out.get("stats", {})
+
     trainer = _Trainer(
         model, loader, optimizer=optimizer, epochs=args.epochs,
         steps_per_epoch=steps_per_epoch, device=device, scheduler=scheduler,
         logger=JsonlLogger(log_path), ckpt_path=ckpt_path,
-        grad_clip=args.grad_clip, amp=args.amp,
+        grad_clip=args.grad_clip, amp=args.amp, max_nonfinite_skips=args.skip_nonfinite,
         checkpoint_interval=args.checkpoint_interval, resume=args.resume,
         verbose=args.verbose,
     )
@@ -246,6 +254,8 @@ def parse_args():
     p.add_argument("--ar_prior_levels", type=int, default=4)
     p.add_argument("--ar_slices", type=int, default=8)
     p.add_argument("--flat_z0", action="store_true")
+    p.add_argument("--scale_min", type=float, default=1e-5,
+                   help="Floor on every Gaussian latent scale (numerical stability).")
     p.add_argument("--maf_units", type=lambda s: [int(i) for i in s.split(",") if i], default=[32, 16])
     p.add_argument("--maf_stacks", type=int, default=3)
     # ms2020_vae
@@ -269,7 +279,11 @@ def parse_args():
                    help="Full passes over the dataset (every image once per epoch).")
     p.add_argument("--warmup", type=int, default=400)
     p.add_argument("--patience", type=int, default=20)
-    p.add_argument("--grad_clip", type=float, default=None)
+    p.add_argument("--grad_clip", type=float, default=None,
+                   help="Clip the global grad 2-norm to this value (on unscaled grads under --amp).")
+    p.add_argument("--skip_nonfinite", type=int, default=0,
+                   help="Skip up to this many consecutive steps with non-finite gradients "
+                        "(each one still writes an explosion report); 0 = abort on the first.")
     p.add_argument("--amp", action="store_true", help="Mixed-precision (fp16 autocast + grad scaler).")
     p.add_argument("--compile", action="store_true",
                    help="torch.compile the model (large speedup; first step compiles, ~1-2 min).")

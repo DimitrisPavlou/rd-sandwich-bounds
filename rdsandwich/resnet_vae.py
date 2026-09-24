@@ -51,9 +51,25 @@ LOGIT_OFFSET = 1.0
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
-def softplus_scale(raw: torch.Tensor) -> torch.Tensor:
-    """Map a raw feature to a positive scale near 1 at init (softplus(x + softplus^-1(1)))."""
-    return F.softplus(raw + SOFTPLUS_INV_1)
+def softplus_scale(raw: torch.Tensor, scale_min: float = 0.0) -> torch.Tensor:
+    """Map a raw feature to a positive scale near 1 at init (softplus(x + softplus^-1(1))).
+
+    ``scale_min`` floors the scale: without it a scale can collapse towards 0, where
+    the Gaussian log-density's gradient (~ 1/scale^3) overflows to inf in fp32.
+    """
+    return F.softplus(raw + SOFTPLUS_INV_1) + scale_min
+
+
+def _tstats(x: torch.Tensor) -> dict:
+    """min/max/absmax/non-finite count of a tensor, as plain floats (diagnostics only)."""
+    x = x.detach().float()
+    finite = x[torch.isfinite(x)]
+    return dict(
+        min=finite.min().item() if finite.numel() else float("nan"),
+        max=finite.max().item() if finite.numel() else float("nan"),
+        absmax=finite.abs().max().item() if finite.numel() else float("nan"),
+        nonfinite=int(x.numel() - finite.numel()),
+    )
 
 
 def normal_log_prob(x: torch.Tensor, loc: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
@@ -137,9 +153,11 @@ class LatentBlock(nn.Module):
     """
 
     def __init__(self, feature_channels, latent_channels, *, ar_prior=False,
-                 res_q_param=True, ar_num_slices=0, ar_max_support_ratio=0.5, k=3):
+                 res_q_param=True, ar_num_slices=0, ar_max_support_ratio=0.5, k=3,
+                 scale_min=0.0):
         super().__init__()
         self.latent_channels = latent_channels
+        self.scale_min = scale_min
         self.ar_prior = ar_prior
         self.res_q_param = res_q_param
 
@@ -152,14 +170,14 @@ class LatentBlock(nn.Module):
             self.ar_shift = ChannelwiseARTransform(latent_channels, ar_num_slices, ar_max_support_ratio)
             self.ar_scale = ChannelwiseARTransform(latent_channels, ar_num_slices, ar_max_support_ratio)
 
-    def forward(self, b, t):
+    def forward(self, b, t, stats: Optional[dict] = None):
         det_feats, p_loc, p_scale = torch.split(self.gen_net(t), self.latent_channels, dim=1)
-        p_scale = softplus_scale(p_scale)
+        p_scale = softplus_scale(p_scale, self.scale_min)
 
         bu_loc, bu_scale = torch.chunk(self.inf_net(b), 2, dim=1)
         td_loc, td_scale = torch.chunk(self.td_inf_net(t), 2, dim=1)
         q_loc = bu_loc + td_loc
-        q_scale = softplus_scale(bu_scale) + softplus_scale(td_scale)
+        q_scale = softplus_scale(bu_scale, self.scale_min) + softplus_scale(td_scale, self.scale_min)
         if self.res_q_param:  # parameterize q relative to the prior
             q_loc = q_loc + p_loc
             q_scale = q_scale + p_scale
@@ -179,6 +197,14 @@ class LatentBlock(nn.Module):
         else:
             kl = gaussian_kl(q_loc, q_scale, p_loc, p_scale)
             bits = kl.flatten(1).sum(-1) / LN2
+
+        if stats is not None:
+            stats.update(q_loc=_tstats(q_loc), q_scale=_tstats(q_scale),
+                         p_loc=_tstats(p_loc), p_scale=_tstats(p_scale), z=_tstats(z))
+            if self.ar_prior:
+                stats.update(ar_raw_scale=_tstats(raw_scale), ar_shift=_tstats(shift),
+                             epsilon=_tstats(epsilon), log_q=_tstats(log_q),
+                             log_p=_tstats(log_p), log_det_J=_tstats(log_det_J))
 
         new_t_feats = self.t_adaptor(torch.cat([z, det_feats], dim=1))
         t = t + new_t_feats
@@ -205,6 +231,8 @@ class ResNetVAEConfig:
     maf_units: List[int] = field(default_factory=lambda: [32, 16])
     maf_stacks: int = 3
     df_filters: List[int] = field(default_factory=lambda: [3, 3, 3])  # DeepFactorized layer widths
+    # Floor on every Gaussian (q/p) scale, for numerical stability at high lambda.
+    scale_min: float = 1e-5
 
 
 class ResNetVAE(nn.Module):
@@ -250,6 +278,7 @@ class ResNetVAE(nn.Module):
                 nf, cfg.latent_channels[bu_idx],
                 ar_prior=use_ar, res_q_param=(not use_ar),
                 ar_num_slices=cfg.ar_slices, ar_max_support_ratio=cfg.ar_max_support_ratio,
+                scale_min=cfg.scale_min,
             ))
 
         # Top-level z0 prior.
@@ -267,7 +296,9 @@ class ResNetVAE(nn.Module):
             self.top_prior = None
 
     # ------------------------------------------------------------------ #
-    def forward(self, x, training: Optional[bool] = None):
+    def forward(self, x, training: Optional[bool] = None, return_stats: bool = False):
+        """``return_stats=True`` adds ``out["stats"]``: per-level min/max/non-finite
+        summaries of every latent's loc/scale/bits (slow; for explosion diagnostics)."""
         if training is None:
             training = self.training
 
@@ -279,12 +310,14 @@ class ResNetVAE(nn.Module):
             bu_features.insert(0, fx)  # last (topmost) ends at index 0
 
         bits_per_level: List[torch.Tensor] = []
+        stats = {} if return_stats else None
         t = None
         for i in range(self.num_levels):
             b = bu_features[i]
+            level_stats = {} if return_stats else None
             if i == 0:  # top latent z0
                 q_loc, q_raw_scale = torch.chunk(b, 2, dim=1)
-                q_scale = softplus_scale(q_raw_scale)
+                q_scale = softplus_scale(q_raw_scale, self.cfg.scale_min)
                 z0 = q_loc + q_scale * torch.randn_like(q_loc)
                 log_q = normal_log_prob(z0, q_loc, q_scale).flatten(1).sum(-1)
                 if self.df_prior is not None:
@@ -294,9 +327,16 @@ class ResNetVAE(nn.Module):
                     log_p = self.top_prior.log_prob(z0_flat)
                 z_bits = (log_q - log_p) / LN2
                 t = z0
+                if return_stats:
+                    level_stats.update(q_loc=_tstats(q_loc), q_scale=_tstats(q_scale),
+                                       z=_tstats(z0), log_q=_tstats(log_q), log_p=_tstats(log_p))
             else:
-                _, z_bits, t = self.latent_blocks[i](b, t)
+                _, z_bits, t = self.latent_blocks[i](b, t, stats=level_stats)
             bits_per_level.append(z_bits)
+            if return_stats:
+                level_stats["bits"] = _tstats(z_bits)
+                level_stats["bu_feature"] = _tstats(b)
+                stats[f"level{i}"] = level_stats
             t = self.decoders[i](t)
 
         x_hat = t
@@ -309,7 +349,12 @@ class ResNetVAE(nn.Module):
         loss = bpp + self.cfg.lmbda * mse
         # PSNR (dB) per image, at 8-bit peak, for logging/eval.
         psnr = (20 * math.log10(255.0) - 10.0 * torch.log10(mses.clamp_min(1e-12))).mean()
-        return dict(loss=loss, bpp=bpp, mse=mse, mses=mses, bits=bits, x_hat=x_hat, psnr=psnr)
+        out = dict(loss=loss, bpp=bpp, mse=mse, mses=mses, bits=bits, x_hat=x_hat, psnr=psnr)
+        if return_stats:
+            stats["x_hat"] = _tstats(x_hat)
+            stats.update(loss=loss.item(), bpp=bpp.item(), mse=mse.item())
+            out["stats"] = stats
+        return out
 
     def get_losses(self, x):
         out = self(x)

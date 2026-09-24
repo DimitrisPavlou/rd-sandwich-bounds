@@ -13,7 +13,9 @@
 
 #SBATCH --job-name=rdub_resnetvae
 #SBATCH --partition=hopper_gpu      # Nvidia H100 (test/debug: ampere_gpu A100, or -M anansi -p ada_gpu)
-#SBATCH --array=4-5                 # lambda=0.08 and 0.16 (indices 4, 5 in LAMBDAS below).
+#SBATCH --array=4                   # lambda=0.08 only (index 4 in LAMBDAS below); resumes after NaN at epoch 580.
+                                    #   Don't include 5 while the lambda=0.16 job is still running: both would
+                                    #   write the same checkpoint dir.
                                     #   Full sweep: --array=0-5%2 (all 6, at most 2 running at once).
 #SBATCH --gres=gpu:1                # 1 GPU per task
 #SBATCH --ntasks=1
@@ -62,6 +64,7 @@ python train/train_image_ub.py \
   --patience 60 \
   --checkpoint_interval 25 \
   --lr 1.0e-4 \
+  --grad_clip 5000 \
   --lambda "$LAMBDA" \
   --verbose \
   --compile \
