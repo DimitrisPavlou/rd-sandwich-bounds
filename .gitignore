@@ -16,3 +16,6 @@ data/*.jpg
 data/
 configs/*.yaml
 !configs/templates/
+papers/
+results/
+.DS_Store

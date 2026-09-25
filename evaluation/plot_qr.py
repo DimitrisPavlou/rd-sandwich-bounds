@@ -14,6 +14,11 @@ the train/eval CLI:
     # after running the *_eval.yaml sweeps:
     python evaluation/plot_qr.py --dataset kodak  --out results/qr_kodak.png
     python evaluation/plot_qr.py --dataset tecnick --out results/qr_tecnick.png
+
+Pass ``--rd`` to instead draw the R-D upper bound itself (bpp vs. MSE on the
+[0, 255] scale) from the same eval files:
+
+    python evaluation/plot_qr.py --dataset kodak --rd --out results/rd_kodak.png
 """
 from __future__ import annotations
 
@@ -31,12 +36,12 @@ MODELS = {
 
 
 def points_from_npz(results_dir, model, dataset):
-    """One (bpp, psnr) point per lambda, averaged over images, from the eval npz."""
+    """One (bpp, psnr, mse) point per lambda, averaged over images, from the eval npz."""
     pts = []
     pattern = os.path.join(results_dir, f"rdub-model={model}-lambda=*-dataset={dataset}.npz")
     for path in sorted(glob.glob(pattern)):
         d = np.load(path)
-        pts.append((float(np.mean(d["bpp"])), float(np.mean(d["psnr"]))))
+        pts.append((float(np.mean(d["bpp"])), float(np.mean(d["psnr"])), float(np.mean(d["mse"]))))
     return sorted(pts)
 
 
@@ -48,6 +53,8 @@ def main():
     p.add_argument("--results_dir", default="results/img_compression")
     p.add_argument("--out", default="results/qr_kodak.png")
     p.add_argument("--title", default=None)
+    p.add_argument("--rd", action="store_true",
+                   help="Plot the R-D curve (bpp vs. MSE) instead of quality-rate (PSNR vs. bpp).")
     p.add_argument("--show", action="store_true")
     args = p.parse_args()
 
@@ -72,13 +79,20 @@ def main():
     fig, ax = plt.subplots(figsize=(7, 5))
     for model, pts in curves:
         label, color, marker = MODELS.get(model, (model, None, "o"))
-        bpp = [b for b, _ in pts]
-        psnr = [q for _, q in pts]
-        ax.plot(bpp, psnr, marker=marker, color=color, lw=2, ms=5, label=label)
+        bpp = [b for b, _, _ in pts]
+        if args.rd:
+            ax.plot([m for _, _, m in pts], bpp, marker=marker, color=color, lw=2, ms=5, label=label)
+        else:
+            ax.plot(bpp, [q for _, q, _ in pts], marker=marker, color=color, lw=2, ms=5, label=label)
 
-    ax.set_xlabel("Rate (bits per pixel)")
-    ax.set_ylabel("Quality (PSNR, dB)")
-    ax.set_title(args.title or f"R-D upper bound (quality-rate) on {args.dataset.capitalize()}")
+    if args.rd:
+        ax.set_xlabel("Distortion (MSE, [0, 255] scale)")
+        ax.set_ylabel("Rate (bits per pixel)")
+        ax.set_title(args.title or f"R-D upper bound on {args.dataset.capitalize()}")
+    else:
+        ax.set_xlabel("Rate (bits per pixel)")
+        ax.set_ylabel("Quality (PSNR, dB)")
+        ax.set_title(args.title or f"R-D upper bound (quality-rate) on {args.dataset.capitalize()}")
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     fig.tight_layout()
