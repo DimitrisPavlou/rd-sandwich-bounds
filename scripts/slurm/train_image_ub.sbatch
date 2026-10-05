@@ -13,7 +13,7 @@
 
 #SBATCH --job-name=rdub_resnetvae
 #SBATCH --partition=hopper_gpu      # Nvidia H100 (test/debug: ampere_gpu A100, or -M anansi -p ada_gpu)
-#SBATCH --array=4                   # lambda=0.08 only (index 4 in LAMBDAS below); resumes after NaN at epoch 580.
+#SBATCH --array=0-5%2                   # lambda=0.08 only (index 4 in LAMBDAS below); resumes after NaN at epoch 580.
                                     #   Don't include 5 while the lambda=0.16 job is still running: both would
                                     #   write the same checkpoint dir.
                                     #   Full sweep: --array=0-5%2 (all 6, at most 2 running at once).
