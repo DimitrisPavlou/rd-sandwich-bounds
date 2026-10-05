@@ -1,15 +1,13 @@
 #!/usr/bin/env python
 """CLI for the IMAGE R-D upper bound (paper Sec. 6.4): trains and evaluates the
-two proposed beta-VAEs -- the hierarchical ResNet-VAE (``rdsandwich.resnet_vae``)
-and the Minnen & Singh 2020 beta-VAE (``rdsandwich.ms2020_vae``).
+two proposed beta-VAEs -- the hierarchical ResNet-VAE and the Minnen & Singh
+2020 beta-VAE (both in ``rdsandwich.models.upper_bound``).
 
-Design (Option B): the *training* half reuses the existing, model-agnostic
-``UpperBoundTrainer`` (its ``train_step`` just calls ``model.get_losses(x)``,
-which both image models implement) plus ``ImageFolderSource`` + ``build_loader``.
-The only genuinely new piece is the *evaluation* half: a full-image loop over the
-Kodak/Tecnick test sets (variable-size images, reflect-padded to a multiple of
-the downsampling factor, per-image bpp/PSNR, uint8 reconstruction cast), which
-writes an ``rdub-model=...-lambda=...-dataset=....npz`` for ``evaluation/plot_qr.py``.
+The *training* half uses the model-agnostic ``UpperBoundTrainer`` (its
+``train_step`` just calls ``model.get_losses(x)``) on an ``ImagePatchDataset``.
+The *evaluation* half runs ``rdsandwich.upper_bound.evaluate_full_images`` over
+the Kodak/Tecnick test sets and writes an
+``rdub-model=...-lambda=...-dataset=....npz`` for ``evaluation/plot_qr.py``.
 
 Train (one lambda; see configs/natural_images_*_train.yaml for the sweep):
 
@@ -33,16 +31,13 @@ import sys
 
 import numpy as np
 import torch
-import torch._dynamo  # noqa: F401 (for torch._dynamo.config, used to raise the recompile limit)
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rdsandwich.dataloader import ImageFolderSource, ImagePatchDataset
-from rdsandwich.resnet_vae import ResNetVAE, ResNetVAEConfig
-from rdsandwich.ms2020_vae import MS2020VAE, MS2020VAEConfig
-from rdsandwich.upper_bound import UpperBoundTrainer
+from rdsandwich.data import ImageFolderSource, ImagePatchDataset
+from rdsandwich.models.upper_bound import MS2020VAE, MS2020VAEConfig, ResNetVAE, ResNetVAEConfig
+from rdsandwich.upper_bound import UpperBoundTrainer, evaluate_full_images
 from rdsandwich.utils import (
     JsonlLogger, WarmupReduceLROnPlateau, get_device, get_time_str,
     latest_checkpoint, load_checkpoint, seed_everything,
@@ -103,8 +98,6 @@ def run_train(args, device):
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total params: {pytorch_total_params}")
     model = model.to(device)
-    if args.channels_last:
-        model = model.to(memory_format=torch.channels_last)
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True  # autotune convs for the fixed patch size
 
@@ -119,7 +112,7 @@ def run_train(args, device):
     # With torch.compile, keep the batch size CONSTANT (drop the size-mismatched last
     # batch) so dynamo doesn't recompile the graph for the partial final batch. The
     # model already runs shared sub-modules at several spatial resolutions per forward,
-    # which alone approaches dynamo's recompile limit -- see the bump below.
+    # which alone approaches dynamo's recompile limit (UpperBoundTrainer raises it).
     drop_last = bool(args.compile)
     loader = DataLoader(
         dataset, batch_size=args.batchsize, shuffle=True, drop_last=drop_last,
@@ -140,48 +133,16 @@ def run_train(args, device):
         optimizer, factor=0.5, patience=args.patience, warmup=args.warmup, min_lr=1e-6,
     )
 
-    # torch.compile fuses the many small conv/GDN/AR/deep-factorized kernels for a
-    # large speedup (recovering the graph-execution advantage the authors got from
-    # TensorFlow/XLA). We compile the *forward* and drive it from train_step, but
-    # keep the ORIGINAL module in the trainer so checkpoints/params stay clean
-    # (torch.compile shares parameters, so the optimizer still updates the same
-    # tensors the compiled graph reads).
-    #
-    # The ResNet-VAE/ms2020 forwards call shared sub-modules (conv blocks, channel-AR
-    # transforms, deep-factorized prior) at MANY spatial resolutions in one pass, so
-    # dynamo must specialize a graph per resolution. That's a finite, fixed set, but
-    # it exceeds dynamo's default recompile_limit (8) -> it would give up and fall
-    # back to eager with noisy warnings. Raise the limit so every resolution compiles
-    # once at startup (a few minutes), then steady state is fast.
-    if args.compile:
-        torch._dynamo.config.recompile_limit = 128
-    fwd = torch.compile(model) if args.compile else model
-    cl = args.channels_last
-
-    class _Trainer(UpperBoundTrainer):
-        def train_step(self, x):
-            if cl:
-                x = x.to(memory_format=torch.channels_last)
-            out = fwd(x)
-            return out["loss"], {"rate": out["bpp"].item(), "mse": out["mse"].item()}
-
-        def checkpoint_extra(self):
-            return {"cfg": vars(model.cfg), "model": args.model}
-
-        def diagnostic_forward(self, x):
-            # Eager (uncompiled) model so activation hooks fire; per-level latent stats.
-            if cl:
-                x = x.to(memory_format=torch.channels_last)
-            out = model(x, return_stats=True) if args.model == "resnet_vae" else model(x)
-            return out.get("stats", {})
-
-    trainer = _Trainer(
+    # --compile wraps model.get_losses in torch.compile inside the trainer (large
+    # speedup; the first steps compile one graph per spatial resolution).
+    trainer = UpperBoundTrainer(
         model, loader, optimizer=optimizer, epochs=args.epochs,
         steps_per_epoch=steps_per_epoch, device=device, scheduler=scheduler,
         logger=JsonlLogger(log_path), ckpt_path=ckpt_path,
         grad_clip=args.grad_clip, amp=args.amp, max_nonfinite_skips=args.skip_nonfinite,
         checkpoint_interval=args.checkpoint_interval, resume=args.resume,
-        verbose=args.verbose,
+        verbose=args.verbose, compile=args.compile, channels_last=args.channels_last,
+        checkpoint_metadata={"model": args.model},
     )
     trainer.train()
     print(f"Saved checkpoint to {ckpt_path}")
@@ -204,25 +165,9 @@ def run_eval(args, device):
     print(f"Loaded {ckpt}")
 
     source = ImageFolderSource(args.dataset, patchsize=None, device=device)
-    bpps, mses, psnrs = [], [], []
-    for x in source.all_images():                 # [1, 3, H, W] in [0, 255]
-        x = x.to(device)
-        _, _, H, W = x.shape
-        pad_h, pad_w = (-H) % factor, (-W) % factor
-        xp = F.pad(x, (0, pad_w, 0, pad_h), mode="reflect") if (pad_h or pad_w) else x
-        out = model(xp)
-        x_hat = out["x_hat"][:, :, :H, :W]
-        if not args.no_cast_xhat:                  # discretized decoder omega (uint8)
-            x_hat = torch.round(torch.clamp(x_hat, 0.0, 255.0))
-        else:
-            x_hat = torch.clamp(x_hat, 0.0, 255.0)
-        mse = torch.mean((x - x_hat) ** 2).item()
-        bpp = out["bits"].sum().item() / (H * W)   # bits over ORIGINAL pixel count
-        bpps.append(bpp)
-        mses.append(mse)
-        psnrs.append(20 * math.log10(255.0) - 10 * math.log10(max(mse, 1e-12)))
-
-    bpps, mses, psnrs = map(np.array, (bpps, mses, psnrs))
+    res = evaluate_full_images(model, source.all_images(), pad_factor=factor,
+                               cast_xhat=not args.no_cast_xhat, device=device)
+    bpps, mses, psnrs = res["bpp"], res["mse"], res["psnr"]
     dsname = dataset_shortname(args.dataset)
     os.makedirs(args.results_dir, exist_ok=True)
     out_path = os.path.join(

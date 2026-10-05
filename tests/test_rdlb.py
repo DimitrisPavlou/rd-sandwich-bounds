@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from rdsandwich.models import make_mlp
+from rdsandwich.layers import make_mlp
 from rdsandwich.lower_bound import (
     LowerBoundTrainer,
     RDLBTrainConfig,
@@ -10,7 +10,7 @@ from rdsandwich.lower_bound import (
     estimate_R_lower_bound,
     optimize_y,
 )
-from rdsandwich.dataloader import GaussianSource, build_loader
+from rdsandwich.data import GaussianSource, build_loader
 
 
 def test_optimize_y_quick_runs():

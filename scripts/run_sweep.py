@@ -12,7 +12,7 @@ becomes::
     python scripts/run_sweep.py --config configs/gaussian_ub.yaml
 
 Each (latent_dim, lambda) combination is expanded from the config's ``sweep``
-block (see ``rdsandwich.config``) and launched as its own process — the same
+block (see ``rdsandwich.sweep``) and launched as its own process — the same
 "one hyperparameter combo per process" isolation as ``parallel``. Use
 ``--jobs N`` to run up to N of them concurrently, and ``--dry-run`` to print
 the commands without running anything.
@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rdsandwich.config import expand_sweep, load_config, params_to_argv
+from rdsandwich.sweep import expand_sweep, load_config, params_to_argv
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPTS_DIR)

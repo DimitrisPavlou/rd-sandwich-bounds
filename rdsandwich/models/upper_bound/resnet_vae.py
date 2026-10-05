@@ -40,26 +40,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .models import DeepFactorized, MAF, ChannelwiseARTransform, GDN
-from .utils import SOFTPLUS_INV_1
+from ...layers import DeepFactorized, MAF, ChannelwiseARTransform, GDN
+from ._common import LN2, gaussian_kl, normal_log_prob, softplus_scale
 
-LN2 = math.log(2.0)
-LOG2PI = math.log(2.0 * math.pi)
 LOGIT_OFFSET = 1.0
 
 
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
-def softplus_scale(raw: torch.Tensor, scale_min: float = 0.0) -> torch.Tensor:
-    """Map a raw feature to a positive scale near 1 at init (softplus(x + softplus^-1(1))).
-
-    ``scale_min`` floors the scale: without it a scale can collapse towards 0, where
-    the Gaussian log-density's gradient (~ 1/scale^3) overflows to inf in fp32.
-    """
-    return F.softplus(raw + SOFTPLUS_INV_1) + scale_min
-
-
 def _tstats(x: torch.Tensor) -> dict:
     """min/max/absmax/non-finite count of a tensor, as plain floats (diagnostics only)."""
     x = x.detach().float()
@@ -69,19 +58,6 @@ def _tstats(x: torch.Tensor) -> dict:
         max=finite.max().item() if finite.numel() else float("nan"),
         absmax=finite.abs().max().item() if finite.numel() else float("nan"),
         nonfinite=int(x.numel() - finite.numel()),
-    )
-
-
-def normal_log_prob(x: torch.Tensor, loc: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    return -0.5 * (((x - loc) / scale) ** 2 + LOG2PI) - torch.log(scale)
-
-
-def gaussian_kl(q_loc, q_scale, p_loc, p_scale):
-    """KL( N(q_loc, q_scale) || N(p_loc, p_scale) ), elementwise."""
-    return (
-        torch.log(p_scale) - torch.log(q_scale)
-        + (q_scale ** 2 + (q_loc - p_loc) ** 2) / (2.0 * p_scale ** 2)
-        - 0.5
     )
 
 
@@ -359,3 +335,7 @@ class ResNetVAE(nn.Module):
     def get_losses(self, x):
         out = self(x)
         return out["loss"], out["bpp"], out["mse"]
+
+    def diagnostics(self, x):
+        """Per-level latent statistics, for the trainer's explosion report."""
+        return self(x, return_stats=True)["stats"]

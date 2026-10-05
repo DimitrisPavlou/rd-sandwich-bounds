@@ -19,10 +19,9 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rdsandwich.dataloader import build_loader, get_source
-from rdsandwich.upper_bound import (
-    RDUBConfig, RDUBModel, UpperBoundTrainer, check_no_decoder, make_lr_scheduler,
-)
+from rdsandwich.data import build_loader, get_source
+from rdsandwich.models.upper_bound import RDUBConfig, RDUBModel, check_no_decoder
+from rdsandwich.upper_bound import UpperBoundTrainer, make_lr_scheduler
 from rdsandwich.utils import (
     JsonlLogger, config_dict_to_str, get_device, get_time_str, seed_everything,
 )

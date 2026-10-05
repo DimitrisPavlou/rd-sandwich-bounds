@@ -11,7 +11,7 @@ from PIL import Image
 
 pytest.importorskip("PIL")
 
-from rdsandwich.dataloader.image import ImageFolderSource, ImagePatchDataset
+from rdsandwich.data.image import ImageFolderSource, ImagePatchDataset
 
 
 def _make_images(dirpath, n=5, size=(64, 80)):
@@ -49,7 +49,7 @@ def test_preload_decodes_once(tmp_path, monkeypatch):
     root = _make_images(tmp_path, n=4)
     ds = ImagePatchDataset(root, patchsize=16, preload=True)
 
-    import rdsandwich.dataloader.image as image_mod
+    import rdsandwich.data.image as image_mod
     calls = {"n": 0}
     real_open = Image.open
 

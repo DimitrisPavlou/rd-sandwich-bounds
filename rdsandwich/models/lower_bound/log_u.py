@@ -1,9 +1,9 @@
 """The lower bound's ``log u`` model factory.
 
 Unlike the upper bound, the lower bound has no bespoke model class computing the
-objective — the objective lives in ``algorithm.py`` / the trainer. The "model"
+objective — the objective lives in ``rdsandwich.lower_bound``. The "model"
 is just a network mapping x -> a scalar ``log u(x)``, built from the generic
-blocks in ``rdsandwich.models``.
+blocks in ``rdsandwich.layers``.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Sequence
 
 import torch.nn as nn
 
-from ..models import get_convnet, make_mlp
+from ...layers import get_convnet, make_mlp
 
 
 def build_log_u_model(

@@ -5,7 +5,7 @@ dataloader, the optimizer/scheduler step, per-epoch metric averaging, jsonl
 logging, and checkpointing — so that a concrete trainer only has to say how a
 single batch becomes a loss (``train_step``). The upper- and lower-bound
 trainers subclass this; because the loop consumes any iterable of ``x``
-batches, the same trainer works across every source in ``rdsandwich.dataloader``.
+batches, the same trainer works across every source in ``rdsandwich.data``.
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """MLP / activation building blocks (ported from ``nn_models.py``).
 
-``GDN`` lives in :mod:`rdsandwich.models.gdn` and is re-exported here for
+``GDN`` lives in :mod:`rdsandwich.layers.gdn` and is re-exported here for
 backward compatibility.
 """
 from __future__ import annotations

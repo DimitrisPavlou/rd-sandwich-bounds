@@ -11,7 +11,7 @@
 # Run:   python scripts/run_sweep.py --config configs/templated/train_rdub.template.yaml
 #        (add --dry-run to print the commands, -j N to run N concurrently)
 #
-# Convention (rdsandwich/config.py -> params_to_argv):
+# Convention (rdsandwich/sweep.py -> params_to_argv):
 #   * bool true  -> bare --flag ; bool false / null -> flag omitted (store_true args)
 #   * list [a,b] -> --flag a,b
 #   * scalar     -> --flag <value>

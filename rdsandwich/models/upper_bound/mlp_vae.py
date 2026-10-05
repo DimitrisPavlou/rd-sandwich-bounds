@@ -1,25 +1,42 @@
-"""R-D UPPER BOUND model (Section 3 of the paper).
+"""R-D upper-bound model for vector data: an MLP beta-VAE (Section 3 of the paper).
 
 A beta-VAE whose likelihood is induced by the squared-error distortion; per
 Corollary A.3.1 the resulting (D, R) point lies above the true R(D) curve for
 every lambda. Ported from ``rdub_mlp.py``.
 
-Supported priors ``Q_Z``: 'std_gaussian', 'maf' (see ``rdsandwich.models.flows``),
+Supported priors ``Q_Z``: 'std_gaussian', 'maf' (see ``rdsandwich.layers.flows``),
 and factorized Gaussian/logistic mixtures ('gmm_<k>' / 'gsm_<k>' / 'lmm_<k>' /
 'lsm_<k>'). Supported posterior ``Q_{Z|X}``: 'gaussian'.
 """
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from dataclasses import dataclass, field
+from typing import List, Sequence
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..models import MAF, make_mlp
-from ..utils import SOFTPLUS_INV_1
-from .config import RDUBConfig
+from ...layers import MAF, make_mlp
+from ...utils import SOFTPLUS_INV_1
+
+
+@dataclass
+class RDUBConfig:
+    data_dim: int
+    latent_dim: int
+    lmbda: float = 0.01
+    encoder_units: List[int] = field(default_factory=list)
+    decoder_units: List[int] = field(default_factory=list)  # [0] => no decoder (Z == Y)
+    encoder_activation: str = "softplus"
+    decoder_activation: str = "softplus"
+    prior_type: str = "std_gaussian"  # std_gaussian | maf | gmm_<k> | gsm_<k> | lmm_<k> | lsm_<k>
+    posterior_type: str = "gaussian"
+    ar_hidden_units: List[int] = field(default_factory=lambda: [10, 10])
+    maf_stacks: int = 3
+    rpd: bool = False  # normalize rate by data_dim (rate "per dimension")
+    nats: bool = False  # report rate in nats (else bits)
 
 
 def check_no_decoder(decoder_units: Sequence[int]) -> bool:

@@ -5,7 +5,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from rdsandwich.dataloader import build_loader
+from rdsandwich.data import build_loader
 from rdsandwich.utils import BaseTrainer, WarmupReduceLROnPlateau
 
 

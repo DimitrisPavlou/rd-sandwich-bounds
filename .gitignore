@@ -13,7 +13,7 @@ data/*.jpg
 !data/.gitkeep
 .venv/
 *.pt
-data/
+/data/
 configs/*.yaml
 !configs/templates/
 papers/

@@ -1,7 +1,8 @@
 import torch
 
-from rdsandwich.upper_bound import RDUBConfig, RDUBModel, UpperBoundTrainer
-from rdsandwich.dataloader import GaussianSource, build_loader
+from rdsandwich.models.upper_bound import RDUBConfig, RDUBModel
+from rdsandwich.upper_bound import UpperBoundTrainer
+from rdsandwich.data import GaussianSource, build_loader
 
 
 def test_rdub_z_equals_y_forward():

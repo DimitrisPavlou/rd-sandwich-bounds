@@ -4,7 +4,7 @@ import math
 import pytest
 import torch
 
-from rdsandwich.resnet_vae import ResNetVAE, ResNetVAEConfig
+from rdsandwich.models.upper_bound import ResNetVAE, ResNetVAEConfig
 
 
 def _cfg(**kw):
@@ -75,7 +75,7 @@ def test_overfits_a_fixed_batch():
 
 def test_scale_floor_and_stats():
     """Every latent scale respects cfg.scale_min; return_stats reports per-level summaries."""
-    from rdsandwich.resnet_vae import softplus_scale
+    from rdsandwich.models.upper_bound._common import softplus_scale
     assert softplus_scale(torch.tensor([-1e4]), 1e-5).item() == pytest.approx(1e-5)
     m = ResNetVAE(_cfg(ar_prior_levels=2, ar_slices=4, scale_min=1e-3))
     with torch.no_grad():

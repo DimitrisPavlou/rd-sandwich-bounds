@@ -25,10 +25,9 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rdsandwich.dataloader import build_loader, get_source
-from rdsandwich.lower_bound import (
-    LowerBoundTrainer, RDLBTrainConfig, build_log_u_model, estimate_R_lower_bound,
-)
+from rdsandwich.data import build_loader, get_source
+from rdsandwich.lower_bound import LowerBoundTrainer, RDLBTrainConfig, estimate_R_lower_bound
+from rdsandwich.models.lower_bound import build_log_u_model
 from rdsandwich.utils import (
     JsonlLogger, config_dict_to_str, get_device, get_time_str, load_checkpoint, seed_everything,
 )

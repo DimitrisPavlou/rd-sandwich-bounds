@@ -1,6 +1,6 @@
 import os
 
-from rdsandwich.config import expand_sweep, load_config, params_to_argv
+from rdsandwich.sweep import expand_sweep, load_config, params_to_argv
 
 
 def test_expand_sweep_cartesian_product():

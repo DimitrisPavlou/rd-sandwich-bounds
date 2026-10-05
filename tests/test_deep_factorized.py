@@ -1,7 +1,7 @@
 """Tests for the deep factorized density (Ballé 2018, App. 6.1)."""
 import torch
 
-from rdsandwich.models import DeepFactorized
+from rdsandwich.layers import DeepFactorized
 
 
 def test_density_normalizes_to_one():

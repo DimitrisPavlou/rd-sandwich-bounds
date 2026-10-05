@@ -47,7 +47,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rdsandwich.dataloader import gaussian_analytical_rd
+from rdsandwich.data import gaussian_analytical_rd
 
 
 def _parse_token(name: str, key: str):

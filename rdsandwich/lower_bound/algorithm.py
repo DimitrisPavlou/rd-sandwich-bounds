@@ -14,6 +14,8 @@ from typing import Optional
 
 import torch
 
+from .config import RDLBTrainConfig
+
 
 def batch_mse(x: torch.Tensor, y: torch.Tensor, chunksize: Optional[int] = None) -> torch.Tensor:
     """Pairwise MSE between a [B, *dims] batch x and a [P, *dims] batch y -> [B, P].
@@ -200,3 +202,20 @@ def optimize_y_vectorized(
         ])  # [P]
         best = int(torch.argmax(final_log_obj))
         return dict(opt_y=Y[best].detach().clone(), opt_log_supobj=final_log_obj[best].item())
+
+
+def run_optimize_y(cfg: RDLBTrainConfig, log_u_fun, x, lamb):
+    """Dispatch to the sequential or vectorized inner optimizer per ``cfg``.
+
+    Vectorized is the default (much faster on GPU); ``cfg.y_sequential=True``
+    falls back to the per-candidate loop, and ``cfg.cand_chunk`` bounds the
+    vectorized path's memory for image data (ignored when sequential).
+    """
+    common = dict(
+        num_steps=cfg.y_steps, lr=cfg.y_lr, tol=cfg.y_tol,
+        init=cfg.y_init, quick_topn=cfg.y_quick_topn, chunksize=cfg.chunksize,
+        verbose=False,
+    )
+    if cfg.y_sequential:
+        return optimize_y(log_u_fun, x, lamb, **common)
+    return optimize_y_vectorized(log_u_fun, x, lamb, cand_chunk=cfg.cand_chunk, **common)

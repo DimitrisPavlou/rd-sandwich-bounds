@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from rdsandwich.dataloader import (
+from rdsandwich.data import (
     BananaSource, GaussianSource, NdBananaEmbedder, gaussian_analytical_rd, gen_gaussian_params,
 )
 

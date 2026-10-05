@@ -12,7 +12,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rdsandwich.dataloader import gen_gaussian_params
+from rdsandwich.data import gen_gaussian_params
 
 
 def main():

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 
 python - <<'PY'
 import numpy as np
-from rdsandwich.dataloader import BananaSource
+from rdsandwich.data import BananaSource
 np.save("data/banana-dim=2-samples=100000.npy", BananaSource().sample(100000).numpy())
 PY
 

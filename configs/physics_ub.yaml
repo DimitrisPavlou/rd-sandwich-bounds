@@ -17,7 +17,7 @@
 # rate=0). The authors do NOT standardize the data; large lambda is what escapes collapse.
 #
 # Two of the authors' flags are not ported and have no counterpart here:
-#   --ar_activation softplus  : MADE (rdsandwich/models/flows.py) uses a fixed activation.
+#   --ar_activation softplus  : MADE (rdsandwich/layers/flows.py) uses a fixed activation.
 #   --max_validation_steps 20 : this port has no validation loop.
 # Also note: 'train' is a positional subcommand in the original rdub_mlp.py; this port is
 # flat-flag (see train/train_rdub.py), so it is not needed.

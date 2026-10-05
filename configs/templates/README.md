@@ -38,7 +38,7 @@ and add `-j N` to run up to N concurrently.
 
 ## Config format (recap)
 
-A config has three top-level keys (see [`rdsandwich/config.py`](../../rdsandwich/config.py)):
+A config has three top-level keys (see [`rdsandwich/sweep.py`](../../rdsandwich/sweep.py)):
 
 - `script:` — which `train/<script>.py` to run.
 - `fixed:` — flags identical across every run.
