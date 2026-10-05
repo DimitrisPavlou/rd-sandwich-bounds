@@ -15,7 +15,6 @@ experiment configs live one directory up in [`configs/`](..).
 |---|---|---|
 | [`train_rdub.template.yaml`](train_rdub.template.yaml) | `train/train_rdub.py` | R-D **upper** bound (β-VAE) |
 | [`train_rdlb.template.yaml`](train_rdlb.template.yaml) | `train/train_rdlb.py` | R-D **lower** bound (log-u network) |
-| [`train_resnet_vae.template.yaml`](train_resnet_vae.template.yaml) | `train/train_resnet_vae.py` | Image UB, minimal ResNet-VAE trainer (GAN-image / Sec. 6.3) |
 | [`train_image_ub.template.yaml`](train_image_ub.template.yaml) | `train/train_image_ub.py` | Natural-image UB, full pipeline (train+eval, resnet_vae + ms2020_vae) |
 
 ## Which template backs which existing experiment
@@ -27,7 +26,6 @@ experiment configs live one directory up in [`configs/`](..).
 | `natural_images_resnet_vae_train.yaml`, `natural_images_resnet_vae_eval.yaml` | `train_image_ub.template.yaml` (`model: resnet_vae`) |
 | `natural_images_ms2020_vae_train.yaml`, `natural_images_ms2020_vae_eval.yaml` | `train_image_ub.template.yaml` (`model: ms2020_vae`) |
 | `smoke_natural_images.yaml` | `train_image_ub.template.yaml` |
-| (GAN basenji d=2/d=4, Sec. 6.3) | `train_resnet_vae.template.yaml` |
 
 ## Usage
 

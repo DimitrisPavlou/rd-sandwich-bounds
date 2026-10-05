@@ -15,7 +15,6 @@ independently of any one experiment.
 ```bash
 cd rd_reproduce
 pip install -e .                 # core (Gaussian/banana/physics/speech experiments)
-pip install -e ".[images]"       # + compressai, pytorch-pretrained-biggan (GAN/image experiments)
 pip install -e ".[dev]"          # + pytest, matplotlib
 ```
 
@@ -58,10 +57,8 @@ rdsandwich/                  installable package
     trainer.py               LowerBoundTrainer (overrides train()) + est_R_ evaluator
   resnet_vae.py              hierarchical ResNet-VAE for image UB (bidirectional inference)
   ms2020_vae.py              Minnen&Singh-2020 beta-VAE for image UB (channel-AR prior)
-  compression_baselines.py   CompressAI mbt2018 / ms2020 baselines (pending; to be replaced by downloaded curves)
-  biggan.py                  BigGAN-backed GAN-image source (pending)
   config.py                  YAML sweep loader (expand_sweep / params_to_argv)
-train/                       training CLIs (train_rdub / train_rdlb / train_resnet_vae)
+train/                       training CLIs (train_rdub / train_rdlb / train_image_ub)
 evaluation/                  plotting + evaluation (plot_rdub.py)
 scripts/                     misc CLIs (gen_gaussian_params, prepare_imgs, run_ba, run_sweep)
 configs/                     YAML experiment configs (parameter sweeps)
@@ -74,23 +71,23 @@ tests/                       pytest suite
 > the shared `models/`, `dataloader/`, and `utils/` subpackages. Both trainers
 > subclass `utils/trainer.py`'s `BaseTrainer` — `UpperBoundTrainer` fills its
 > `train_step` hook, while `LowerBoundTrainer` overrides `train()` for the
-> step-based Algorithm-1 loop. The image models (`resnet_vae.py`, `biggan.py`,
-> `compression_baselines.py`) still live as flat modules pending their own slice.
+> step-based Algorithm-1 loop. The image models (`resnet_vae.py`, `ms2020_vae.py`)
+> still live as flat modules pending their own slice.
 
 ## Mapping from the original TensorFlow repo
 
 | Original file | Ported to | Notes |
 |---|---|---|
-| `rdub_mlp.py` | `rdsandwich/upper_bound/`, `train/train_rdub.py` | Full port: `gaussian`/`gmm_k`/`gsm_k`/`lmm_k`/`lsm_k`/`maf`/`std_gaussian` priors, optional decoder (Z==Y support), MLP encoder/decoder. The `'deep'` (DeepFactorized) prior and `posterior_type='uniform'` (used only for the NTC quantization baseline) are **not ported** — see `compression_baselines.py` for an NTC-equivalent baseline instead. |
+| `rdub_mlp.py` | `rdsandwich/upper_bound/`, `train/train_rdub.py` | Full port: `gaussian`/`gmm_k`/`gsm_k`/`lmm_k`/`lsm_k`/`maf`/`std_gaussian` priors, optional decoder (Z==Y support), MLP encoder/decoder. The `'deep'` (DeepFactorized) prior and `posterior_type='uniform'` (used only for the NTC quantization baseline) are **not ported**. |
 | `rdlb.py` | `rdsandwich/lower_bound/`, `train/train_rdlb.py` | Full port of `compute_Ckobj`/`batch_mse`/`optimize_y`/the Algorithm-1 outer loop/`est_R_`. `--anneal_lamb` (single-run lambda sweep) is not ported; run one `--lamb` per invocation, as `experiments/*.sh` does. |
 | `ba.py` | `rdsandwich/utils/ba.py`, `scripts/run_ba.py` | Near-verbatim port — the original was already NumPy/SciPy only. |
 | `nn_models.py` | `rdsandwich/models/` (`mlp.py`, `conv.py`) | `make_mlp`/`get_activation`/GDN in `mlp.py`; `get_convnet` in `conv.py`. |
 | `ntc_sources.py` | `rdsandwich/dataloader/` | `get_banana`/`get_nd_banana` -> `BananaSource`/`NdBananaEmbedder` (in `banana.py`), reproducing the same sequence of (inverted) transforms; `build_loader` turns any source into a `DataLoader`. |
 | `gen_gaussian_params.py` | `scripts/gen_gaussian_params.py` | Direct port. |
 | `prepare_imgs.py` | `scripts/prepare_imgs.py` | Direct port (Pillow instead of `tf.image`). |
-| `resnet_vae.py` | `rdsandwich/resnet_vae.py`, `train/train_resnet_vae.py` | **Full port.** A hierarchical ResNet-VAE with GDN residual encoder/decoder blocks (Cheng et al. 2020), true **bidirectional inference** at each `LatentBlock` (bottom-up + top-down posterior, optionally parameterized relative to the prior), a **channel-wise autoregressive (IAF) prior** on the bottom `--ar_prior_levels` generative levels, and a per-channel **deep factorized** prior on the top latent `z0` (or a flattened MAF with `--flat_z0`, for the GAN experiments). This is the `dim(Z) ≈ 0.66 dim(X)` model of Sec. 6.3/6.4. |
-| `ms2020.py` (β-VAE variant) | `rdsandwich/ms2020_vae.py` | **Ported architecture, β-VAE recipe.** The Minnen & Singh 2020 channel-autoregressive autoencoder (analysis/synthesis/hyper transforms per Ballé 2018 Table 1, 10 channel slices with LRP), converted to an R-D **upper-bound** β-VAE per the paper's App. A.5.7: factorized-Gaussian posteriors with learned means/variances, a deep factorized hyperprior **not** convolved with a uniform, and a Gaussian channel-conditional prior. The authors' public repo ships only the *operational* `ms2020.py` (rounding/entropy-coded, used as a baseline); the β-VAE upper-bound variant (`rdub-model=ms2020_vae`) had no released code, so this is reconstructed from the architecture + paper. |
-| `mbt2018.py`, `ms2020.py` (operational baselines), `biggan.py` | `rdsandwich/compression_baselines.py`, `rdsandwich/biggan.py` | **Baseline comparison curves are not retrained.** The operational Q-R curves (Minnen 2018/2020, VTM, BPG, JPEG2000, …) in Fig. 3 are published numbers; they will be downloaded from the `tensorflow/compression` and CompressAI results directories rather than retrained (Phase 0 — replacing `compression_baselines.py`). `biggan.py` (GAN-image source for Sec. 6.3) still wraps `pytorch-pretrained-biggan`. |
+| `resnet_vae.py` | `rdsandwich/resnet_vae.py`, `train/train_image_ub.py` | **Full port.** A hierarchical ResNet-VAE with GDN residual encoder/decoder blocks (Cheng et al. 2020), true **bidirectional inference** at each `LatentBlock` (bottom-up + top-down posterior, optionally parameterized relative to the prior), a **channel-wise autoregressive (IAF) prior** on the bottom `--ar_prior_levels` generative levels, and a per-channel **deep factorized** prior on the top latent `z0` (or a flattened MAF with `--flat_z0`, for the GAN experiments). This is the `dim(Z) ≈ 0.66 dim(X)` model of Sec. 6.3/6.4. |
+| `ms2020.py` (β-VAE variant) | `rdsandwich/ms2020_vae.py`, `train/train_image_ub.py` | **Ported architecture, β-VAE recipe.** The Minnen & Singh 2020 channel-autoregressive autoencoder (analysis/synthesis/hyper transforms per Ballé 2018 Table 1, 10 channel slices with LRP), converted to an R-D **upper-bound** β-VAE per the paper's App. A.5.7: factorized-Gaussian posteriors with learned means/variances, a deep factorized hyperprior **not** convolved with a uniform, and a Gaussian channel-conditional prior. The authors' public repo ships only the *operational* `ms2020.py` (rounding/entropy-coded, used as a baseline); the β-VAE upper-bound variant (`rdub-model=ms2020_vae`) had no released code, so this is reconstructed from the architecture + paper. |
+| `mbt2018.py`, `ms2020.py` (operational baselines), `biggan.py` | — | **Not ported.** The operational Q-R baseline curves (Minnen 2018/2020, VTM, BPG, JPEG2000, …) in Fig. 3 are published numbers and are not retrained here. The GAN-image experiments (Sec. 6.3, BigGAN source) are out of scope. |
 | `boilerplate.py` | — | Keras-training-loop plumbing (LR schedules, callbacks); superseded by `rdsandwich/utils/trainer.py`'s `BaseTrainer` and the per-bound trainer subclasses. |
 | `utils.py` | `rdsandwich/utils/` (`io.py`, `torch_utils.py`) | jsonl logging (`get_json_logging_callback` -> `JsonlLogger`), `config_dict_to_str`, checkpoint helpers replacing `model.save_weights`/`load_weights`; re-exported from `rdsandwich.utils`. |
 
@@ -130,7 +127,7 @@ python evaluation/plot_rdub.py --checkpoint_dir checkpoints/gaussian \
 
 See `configs/` for YAML sweep definitions and `experiments/` for the original
 shell scripts covering the Gaussian, banana, particle-physics/speech,
-GAN-image, and natural-image sweeps from the paper's README.
+and natural-image sweeps from the paper's README.
 
 ## Running hyperparameter sweeps from a YAML config
 
@@ -171,7 +168,7 @@ Each combination is launched as its own process (the same isolation as
 (`rdsandwich.config`) is a small pure module: `expand_sweep` builds one params
 dict per run and `params_to_argv` renders it into the `--flag value` argv the
 `train_*.py` CLIs already accept. `run_sweep.py` drives the training CLIs
-`train_rdub`, `train_rdlb`, and `train_resnet_vae` (all flat-flag). For the
+`train_rdub`, `train_rdlb`, and `train_image_ub` (all flat-flag). For the
 lower bound, set `command: train` and `eval_after: true` in the config so each
 run trains and then writes its `rd-*.npz` (see `configs/gaussian_lb.yaml`).
 
@@ -187,8 +184,8 @@ port keeps that same "one hyperparameter combo per process" granularity
 it easier to actually scale:
 
 - **Each algorithm is a plain, importable PyTorch training loop**
-  (`train_rdub`, `train_rdlb`, `ResNetVAE.get_losses` + your own loop, or
-  `compression_baselines.train_baseline`) with no Keras/`tf.function`
+  (`train_rdub`, `train_rdlb`, or `ResNetVAE.get_losses` + your own loop)
+  with no Keras/`tf.function`
   tracing to fight with — drop them into a job-queue (Slurm array, Ray, or
   `torch.multiprocessing`) exactly as you would any other PyTorch script.
 - **`RDLBTrainConfig.chunksize`** bounds peak memory in the pairwise-MSE
@@ -201,10 +198,6 @@ it easier to actually scale:
   but embarrassingly parallel *across* the `M` (`num_Ck_samples`) draws —
   see the `for _ in range(M)` loop in `train_rdlb`, which is the natural
   place to fan out across devices/processes.
-- **Neural-compression baselines and BigGAN sampling now come from
-  actively-maintained, GPU-optimized PyTorch packages** (CompressAI,
-  `pytorch-pretrained-biggan`) instead of hand-rolled TF ports, so they
-  benefit from upstream performance work for free.
 - **jsonl logs** (`rdsandwich.utils.JsonlLogger`) are the same flat,
   appendable format as the original repo, so existing `utils.aggregate_*`
   style post-processing / plotting code needs only minor tweaks.

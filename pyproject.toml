@@ -18,7 +18,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-images = ["compressai>=1.2", "pytorch-pretrained-biggan>=0.1.1"]
 dev = ["pytest>=7.0", "matplotlib>=3.5"]
 
 [tool.setuptools.packages.find]

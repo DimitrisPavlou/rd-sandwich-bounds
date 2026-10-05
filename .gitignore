@@ -19,3 +19,4 @@ configs/*.yaml
 papers/
 results/
 .DS_Store
+.idea/

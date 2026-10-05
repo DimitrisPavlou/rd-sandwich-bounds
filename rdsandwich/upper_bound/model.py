@@ -38,8 +38,7 @@ class RDUBModel(nn.Module):
 
         if cfg.posterior_type != "gaussian":
             raise NotImplementedError(
-                f"posterior_type={cfg.posterior_type!r} not ported; use 'gaussian' "
-                "(see rdsandwich.compression_baselines for NTC-style uniform posteriors)."
+                f"posterior_type={cfg.posterior_type!r} not ported; use 'gaussian'."
             )
         encoder_out_dim = 2 * latent_dim  # loc, raw_scale
         self.encoder = make_mlp(
