@@ -1,7 +1,7 @@
 """R-D upper bound specialized to images: a hierarchical ResNet-VAE.
 
 Faithful PyTorch port of the original ``resnet_vae.py`` (Yang & Mandt, 2022,
-Sec. 6.3/6.4). The model is a beta-VAE whose Gaussian likelihood is induced by
+Sec. 6.4). The model is a beta-VAE whose Gaussian likelihood is induced by
 the squared-error distortion, so its ``(D, R)`` operating points upper-bound the
 source rate-distortion function (Theorem A.3 / Eq. 3 of the paper).
 
@@ -19,10 +19,9 @@ Kingma et al. 2016 for the components):
   * The bottom ``ar_prior_levels`` generative levels use a **channel-wise
     autoregressive (IAF) prior** (:class:`ChannelwiseARTransform`) for added
     expressiveness; the remaining levels use a Gaussian conditional prior.
-  * The top-most latent ``z0`` is coded under either a per-channel
-    :class:`DeepFactorized` prior (fully convolutional, the natural-image
-    setting of Sec. 6.4) or, with ``flat_z0=True``, a flattened MAF prior (the
-    fixed-size GAN-image setting of Sec. 6.3).
+  * The top-most latent ``z0`` is coded under a per-channel
+    :class:`DeepFactorized` prior (fully convolutional, so the model runs on
+    images of any size that is a multiple of the total downsampling).
 
 The objective is the rate-distortion Lagrangian ``bpp + lambda * MSE`` computed
 on images in the ``[0, 255]`` range (matching the paper and the neural-
@@ -40,7 +39,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ...layers import DeepFactorized, MAF, ChannelwiseARTransform, GDN
+from ...layers import DeepFactorized, ChannelwiseARTransform, GDN
 from ._common import LN2, gaussian_kl, normal_log_prob, softplus_scale
 
 LOGIT_OFFSET = 1.0
@@ -193,7 +192,6 @@ class LatentBlock(nn.Module):
 @dataclass
 class ResNetVAEConfig:
     in_channels: int = 3
-    img_dim: int = 256
     latent_channels: List[int] = field(default_factory=lambda: [4, 8, 16, 32, 64, 128])
     num_filters: int = 256
     downsample_factor: int = 2
@@ -202,10 +200,7 @@ class ResNetVAEConfig:
     ar_prior_levels: int = 0
     ar_slices: int = 8
     ar_max_support_ratio: float = 0.5
-    # Top-level prior.
-    flat_z0: bool = False            # True -> flattened MAF prior (fixed-size GAN images)
-    maf_units: List[int] = field(default_factory=lambda: [32, 16])
-    maf_stacks: int = 3
+    # Top-level (z0) DeepFactorized prior.
     df_filters: List[int] = field(default_factory=lambda: [3, 3, 3])  # DeepFactorized layer widths
     # Floor on every Gaussian (q/p) scale, for numerical stability at high lambda.
     scale_min: float = 1e-5
@@ -258,18 +253,7 @@ class ResNetVAE(nn.Module):
             ))
 
         # Top-level z0 prior.
-        if cfg.flat_z0:
-            z0_spatial = cfg.img_dim // (stride ** num_levels)
-            assert z0_spatial * (stride ** num_levels) == cfg.img_dim, "img_dim must divide evenly"
-            self.z0_spatial = z0_spatial
-            self.z0_flat_dim = z0_spatial * z0_spatial * z0_channels
-            self.top_prior = MAF(self.z0_flat_dim, n_stacks=cfg.maf_stacks,
-                                 hidden_units=tuple(cfg.maf_units))
-            self.df_prior = None
-        else:
-            self.z0_spatial = None
-            self.df_prior = DeepFactorized(z0_channels, filters=tuple(cfg.df_filters))
-            self.top_prior = None
+        self.df_prior = DeepFactorized(z0_channels, filters=tuple(cfg.df_filters))
 
     # ------------------------------------------------------------------ #
     def forward(self, x, training: Optional[bool] = None, return_stats: bool = False):
@@ -296,11 +280,7 @@ class ResNetVAE(nn.Module):
                 q_scale = softplus_scale(q_raw_scale, self.cfg.scale_min)
                 z0 = q_loc + q_scale * torch.randn_like(q_loc)
                 log_q = normal_log_prob(z0, q_loc, q_scale).flatten(1).sum(-1)
-                if self.df_prior is not None:
-                    log_p = self.df_prior.log_prob_nchw(z0)
-                else:
-                    z0_flat = z0.flatten(1)
-                    log_p = self.top_prior.log_prob(z0_flat)
+                log_p = self.df_prior.log_prob_nchw(z0)
                 z_bits = (log_q - log_p) / LN2
                 t = z0
                 if return_stats:

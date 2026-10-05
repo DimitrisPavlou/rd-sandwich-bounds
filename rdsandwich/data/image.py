@@ -13,7 +13,7 @@ construction and keeps it resident as a compact ``uint8`` CHW tensor; each later
 access is then just a random crop (a cheap slice), with **no disk I/O or decode
 after startup**. Storage is ``uint8`` (1 byte/subpixel), so a preloaded set costs
 about ``sum(3 * H * W)`` bytes of RAM -- fine for finite eval-scale sets, but
-check the budget for large training folders (see the RAM note on the classes).
+check the budget for large training folders (see the RAM note on the class).
 
 Requires Pillow and numpy; torchvision is imported lazily only for the rare
 "image smaller than the patch" resize path.
@@ -80,68 +80,29 @@ def _find_paths(root_or_glob: str) -> List[str]:
     return paths
 
 
-class ImageFolderSource(Source):
-    """Infinite random-patch source (``sample`` draws images with replacement).
+class ImageFolderDataset(Source, Dataset):
+    """Images from a folder (or glob), as float tensors in [0, 255].
 
-    ``preload=True`` decodes every image once into a resident ``uint8`` list and
-    samples crops from RAM thereafter -- worthwhile here because ``sample`` is an
-    infinite stream that would otherwise re-decode from disk on every call. RAM
-    cost is about ``sum(3 * H * W)`` bytes.
-    """
+    One class serves every use of an image set:
 
-    def __init__(self, root_or_glob: str, patchsize: Optional[int] = 256,
-                 device=None, preload: bool = False):
-        self.paths = _find_paths(root_or_glob)
-        if patchsize is not None and patchsize <= 0:
-            raise ValueError("patchsize must be positive or None")
-        self.patchsize = patchsize
-        self.device = device
-        # Decoded uint8 CHW tensors, one per path, or None when not preloading.
-        self._images: Optional[List[torch.Tensor]] = (
-            [_read_uint8(p) for p in self.paths] if preload else None
-        )
+      * map-style ``Dataset``: ``__len__`` is the number of images and
+        ``__getitem__`` returns one random ``patchsize``-crop of that image, so a
+        shuffling ``DataLoader`` passes over **every image once per epoch**
+        (different epochs still see different crops);
+      * ``sample(batchsize)``: random crops of images drawn with replacement
+        (what the lower-bound evaluator draws its batches from);
+      * ``all_images()``: whole, un-cropped images one at a time, for full-image
+        (Kodak / Tecnick) evaluation.
 
-    def _image(self, index: int) -> torch.Tensor:
-        """Full ``uint8`` CHW image for ``paths[index]`` (cached or freshly read)."""
-        if self._images is not None:
-            return self._images[index]
-        return _read_uint8(self.paths[index])
+    ``patchsize=None`` disables cropping. ``max_images`` optionally caps the set
+    (e.g. for smoke tests).
 
-    def _load(self, path: str) -> torch.Tensor:
-        # Kept for backwards compat (path-based, non-preload decode).
-        return _random_crop(_read_uint8(path), self.patchsize).float()
-
-    def sample(self, batchsize: int) -> torch.Tensor:
-        if batchsize <= 0:
-            raise ValueError("batchsize must be positive")
-        idx = random.choices(range(len(self.paths)), k=batchsize)
-        batch = torch.stack([_random_crop(self._image(i), self.patchsize).float()
-                             for i in idx], dim=0)
-        return batch.to(self.device) if self.device else batch
-
-    def all_images(self):
-        """Yield whole (un-cropped) images, one at a time -- for Kodak/Tecnick-style
-        full-image evaluation rather than patch sampling."""
-        for i in range(len(self.paths)):
-            yield self._image(i).float().unsqueeze(0)
-
-
-class ImagePatchDataset(Dataset):
-    """Map-style dataset of one random ``patchsize``-crop per image, in [0, 255].
-
-    ``__len__`` is the number of images, so a standard shuffling ``DataLoader``
-    passes over **every image once per epoch** (traditional finite training,
-    ``for x in dataloader``) -- as opposed to the infinite ``.sample()`` stream
-    that :class:`ImageFolderSource` feeds through ``build_loader``. A fresh random
-    crop is drawn each time an image is accessed, so different epochs still see
-    different patches. ``max_images`` optionally caps the set (e.g. for smoke tests).
-
-    ``preload=True`` decodes the whole (capped) dataset into RAM **once** at
-    construction, as ``uint8`` CHW tensors, so no epoch after the first re-decodes
-    anything -- ``__getitem__`` becomes a random crop of an in-memory tensor. Pair
-    it with ``num_workers=0``: there is no decode left to parallelise, and a single
-    resident copy avoids the per-worker cache duplication a lazy cache would incur.
-    RAM cost is about ``sum(3 * H * W)`` bytes over the kept images.
+    ``preload=True`` decodes the whole (capped) set into RAM **once** at
+    construction, as ``uint8`` CHW tensors, so nothing is re-decoded afterwards
+    -- an access becomes a random crop of an in-memory tensor. Pair it with
+    ``num_workers=0``: there is no decode left to parallelise, and a single
+    resident copy avoids per-worker duplication. RAM cost is about
+    ``sum(3 * H * W)`` bytes over the kept images.
     """
 
     def __init__(self, root_or_glob: str, patchsize: Optional[int] = 256,
@@ -156,9 +117,25 @@ class ImagePatchDataset(Dataset):
             [_read_uint8(p) for p in self.paths] if preload else None
         )
 
+    def _image(self, index: int) -> torch.Tensor:
+        """Full ``uint8`` CHW image for ``paths[index]`` (cached or freshly read)."""
+        if self._images is not None:
+            return self._images[index]
+        return _read_uint8(self.paths[index])
+
     def __len__(self) -> int:
         return len(self.paths)
 
     def __getitem__(self, index: int) -> torch.Tensor:
-        img = self._images[index] if self._images is not None else _read_uint8(self.paths[index])
-        return _random_crop(img, self.patchsize).float()  # [3, ps, ps] float in [0, 255]
+        return _random_crop(self._image(index), self.patchsize).float()  # [3, ps, ps] in [0, 255]
+
+    def sample(self, batchsize: int) -> torch.Tensor:
+        if batchsize <= 0:
+            raise ValueError("batchsize must be positive")
+        idx = random.choices(range(len(self.paths)), k=batchsize)
+        return torch.stack([self[i] for i in idx], dim=0)
+
+    def all_images(self):
+        """Yield whole (un-cropped) images as ``[1, 3, H, W]`` float tensors."""
+        for i in range(len(self.paths)):
+            yield self._image(i).float().unsqueeze(0)

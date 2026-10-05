@@ -18,9 +18,10 @@ three core algorithms in the paper —
 
 — can be reused, tested, and scaled independently of any one experiment.
 
-See the top-level README.md for the mapping from the original TF scripts to
-this package, and ``experiments/`` for shell scripts that reproduce the
-paper's commands using the new CLIs in ``scripts/``.
+Models live in ``rdsandwich.models``, the bound algorithms (trainers and
+evaluators) in ``rdsandwich.upper_bound`` / ``rdsandwich.lower_bound``, and data
+loading in ``rdsandwich.data``. See the top-level README.md for the layout, the
+CLIs in ``train/`` and ``evaluation/``, and how to add a model.
 """
 
 __version__ = "0.1.0"

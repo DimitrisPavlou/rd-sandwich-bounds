@@ -287,6 +287,8 @@ class BaseTrainer:
 
     # ----------------------------------------------------------------- #
     def _next_batch(self) -> torch.Tensor:
+        if self._iter is None:  # finite loader: created lazily (see __init__)
+            self._iter = iter(self.loader)
         try:
             batch = next(self._iter)
         except StopIteration:

@@ -1,22 +1,26 @@
 """YAML experiment configs and sweep expansion.
 
-Replaces the GNU-``parallel`` one-liners in ``experiments/*.sh`` with a
-declarative YAML file. A config has three top-level keys::
+Replaces the GNU-``parallel`` one-liners with a declarative YAML file. A config
+has these top-level keys::
 
-    script: train_rdub          # which scripts/<script>.py to run
-    fixed:                      # flags identical across every run
+    script: train_ub            # which CLI to run (train_ub | train_lb | eval_ub | eval_lb),
+                                # or a list run in order for every combination,
+                                # e.g. [train_lb, eval_lb]
+    fixed:                      # flags identical across every run (passed to every script)
       dataset: gaussian
-      data_dim: 1000
       ...
     sweep:                      # flags to vary; the Cartesian product is taken
       latent_dim: [400, 500, 600, 800]
       lambda: [0.3, 1, 3, 10, 30, 100, 300]
+    script_args:                # optional: extra flags for one script only
+      train_lb: {lr: 5.0e-4, num_Ck_samples: 2}
+      eval_lb: {num_Ck_samples: 5}
 
 ``expand_sweep`` turns that into one flat params dict per run (the Cartesian
-product of the ``sweep`` lists, merged onto ``fixed``), and ``params_to_argv``
-renders a params dict into the ``--flag value`` argv list understood by the
-``train/train_*.py`` CLIs. Both are pure functions so they can be unit-tested
-without launching any training.
+product of the ``sweep`` lists, merged onto ``fixed``), ``script_params`` adds a
+script's ``script_args`` on top, and ``params_to_argv`` renders a params dict
+into the ``--flag value`` argv understood by the CLIs. All are pure functions,
+so they can be unit-tested without launching any training.
 """
 from __future__ import annotations
 
@@ -33,6 +37,22 @@ def load_config(path: str) -> Dict[str, Any]:
     if not isinstance(config, dict):
         raise ValueError(f"{path!r} must contain a top-level mapping, got {type(config).__name__}")
     return config
+
+
+def get_scripts(config: Dict[str, Any]) -> List[str]:
+    """The config's ``script`` as a list (a single name becomes a one-element list)."""
+    script = config.get("script")
+    scripts = script if isinstance(script, list) else [script]
+    if not scripts or not all(isinstance(s, str) and s for s in scripts):
+        raise ValueError(f"'script' must be a script name or a list of them, got {script!r}")
+    return scripts
+
+
+def script_params(config: Dict[str, Any], script: str, run: Dict[str, Any]) -> Dict[str, Any]:
+    """One run's params for ``script``: the run's (fixed + sweep) params, then that
+    script's ``script_args`` on top."""
+    extra = (config.get("script_args") or {}).get(script) or {}
+    return {**run, **extra}
 
 
 def expand_sweep(config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -59,7 +79,7 @@ def expand_sweep(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def params_to_argv(params: Dict[str, Any]) -> List[str]:
-    """Render a params dict as an argv list for the ``train/train_*.py`` CLIs.
+    """Render a params dict as an argv list for the training / evaluation CLIs.
 
     Conventions matching those CLIs:
       * ``True``  -> a bare ``--flag`` (argparse ``store_true``); ``False`` / ``None`` are omitted.

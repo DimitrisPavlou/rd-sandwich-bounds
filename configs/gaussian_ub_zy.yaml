@@ -7,9 +7,10 @@
 # Then re-plot: python scripts/plot_rdub.py   (it aggregates ALL rdub-* runs,
 #               so this Z=Y curve is added alongside the dim(Z)<n curves).
 
-script: train_rdub
+script: train_ub
 
 fixed:
+  model: mlp_vae
   dataset: gaussian
   gparams_path: data/gaussian/gaussian_params-dim=1000.npz
   data_dim: 1000

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """Plot the image R-D upper bound (R vs. D) and quality-rate (PSNR vs. bpp)
-curves directly from the per-epoch training logs of ``train/train_image_ub.py``.
+curves directly from the per-epoch training logs of ``train/train_ub.py``.
 
 Use this when only the ``record-*.jsonl`` logs are available (no eval npz on
 Kodak/Tecnick). Each ``rdub-model=<model>-lambda=<lambda>-...`` run folder

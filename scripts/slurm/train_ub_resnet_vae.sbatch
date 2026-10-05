@@ -6,7 +6,7 @@
 # Each array task runs ONE lambda on ONE GPU (training is single-GPU, no DDP),
 # so all 6 lambdas sweep in parallel across the cluster.
 #
-# Submit:  sbatch scripts/slurm/train_image_ub.sbatch
+# Submit:  sbatch scripts/slurm/train_ub_resnet_vae.sbatch
 # Watch:   mysqueue
 #
 # Requires COCO prepared under $VSC_SCRATCH/<code-dir>/data/my_coco_train2017.
@@ -32,6 +32,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$VSC_SCRATCH/.conda_envs/main"
 
 cd "$VSC_SCRATCH/rd-sandwich-bounds"     # repo root, where train/ and data/ live
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"  # import rdsandwich without `pip install -e .`
 mkdir -p logs
 
 # --- lambda sweep (matches the YAML 'sweep' block) ---------------------------
@@ -47,9 +48,8 @@ echo "=== PyTorch / CUDA ==="
 python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA version:', torch.version.cuda); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
 
 # --- launch (fixed args mirror the YAML 'fixed' block) -----------------------
-python train/train_image_ub.py \
+python train/train_ub.py \
   --model resnet_vae \
-  --command train \
   --dataset data/my_coco_train2017 \
   --checkpoint_dir checkpoints/natural_images_resnet_vae_train \
   --latent_channels 4,8,16,32,64,128 \
@@ -60,6 +60,7 @@ python train/train_image_ub.py \
   --batchsize 16 \
   --num_workers 10 \
   --epochs 2000 \
+  --lr_schedule plateau \
   --warmup 1200 \
   --patience 60 \
   --checkpoint_interval 25 \

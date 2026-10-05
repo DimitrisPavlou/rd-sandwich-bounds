@@ -3,8 +3,8 @@
 # auto-sized per dimension via hidden_units_per_dim=20 -> 2 hidden layers of 20n SeLU units
 # (paper A.5.2), so it stays small and fits in memory (unlike n=1000, which OOMs).
 #
-# Trains each run with the fast ("quick") inner optimizer, then (--eval_after) runs the
-# exhaustive optimizer to write the reported rd-*.npz.
+# Each run is trained (train_lb, fast "quick" inner optimizer) and then evaluated
+# (eval_lb, exhaustive inner optimizer), which writes the reported rd-*.npz.
 #
 # Run it with:  python scripts/run_sweep.py --config configs/gaussian_lb.yaml
 #
@@ -13,8 +13,9 @@
 # single-source sandwich with the UB. Its true R(D) (per-dimension) is the standard-Gaussian
 # curve, so plot it separately from the n=1000 UB figure.
 
-script: train_rdlb
+script: [train_lb, eval_lb]
 
+# Flags passed to both train_lb and eval_lb (they locate the same run directory).
 fixed:
   dataset: gaussian            # standard Gaussian N(0, I) (no gparams_path)
   model: mlp
@@ -22,12 +23,7 @@ fixed:
   num_hidden_layers: 2
   activation: selu
   checkpoint_dir: checkpoints/gaussian_lb
-  command: train
   batchsize: 1024              # k (paper fixes k=1024 for the varying-n LB study)
-  num_Ck_samples: 2            # M
-  last_step: 3000
-  checkpoint_interval: 3000
-  y_init: quick
   y_quick_topn: 10
   y_steps: 500
   y_sequential: false          # false = vectorized inner optimizer (fast on GPU; the default).
@@ -35,10 +31,19 @@ fixed:
                                #   (the image-case fallback). For images, prefer keeping this
                                #   false and setting `cand_chunk` to bound the [P, k, *dims] term.
   # cand_chunk: 64             # vectorized only: chunk the P candidates to cap peak memory.
-  lr: 5.0e-4
-  eval_after: true
-  eval_num_Ck_samples: 5
   verbose: true
+
+# Flags for one script only.
+script_args:
+  train_lb:
+    num_Ck_samples: 2          # M
+    y_init: quick
+    last_step: 3000
+    checkpoint_interval: 3000
+    lr: 5.0e-4
+  eval_lb:
+    num_Ck_samples: 5
+    y_init: exhaustive
 
 sweep:
   data_dim: [2, 4, 8, 16]

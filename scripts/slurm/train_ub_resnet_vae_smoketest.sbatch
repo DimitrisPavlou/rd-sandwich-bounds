@@ -6,7 +6,7 @@
 # Read the "time=...s (...s/step)" from epoch 1+ (epoch 0 includes compile warmup)
 # to extrapolate the full run:  hours/lambda ~= 527 * 2000 * (s/step) / 3600.
 #
-# Submit:  sbatch scripts/slurm/train_image_ub_smoketest.sbatch
+# Submit:  sbatch scripts/slurm/train_ub_resnet_vae_smoketest.sbatch
 # Watch:   mysqueue   (then read logs/rdub_smoketest_*.out)
 
 #SBATCH --job-name=rdub_smoketest
@@ -26,6 +26,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$VSC_SCRATCH/.conda_envs/main"
 
 cd "$VSC_SCRATCH/rd-sandwich-bounds"
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"  # import rdsandwich without `pip install -e .`
 mkdir -p logs
 
 # --- sanity checks -----------------------------------------------------------
@@ -37,9 +38,8 @@ echo "=== data ==="
 ls data/my_coco_train2017 | wc -l
 
 # --- tiny training run (same flags as the real job, but scaled down) ---------
-python train/train_image_ub.py \
+python train/train_ub.py \
   --model resnet_vae \
-  --command train \
   --dataset data/my_coco_train2017 \
   --checkpoint_dir checkpoints/smoketest \
   --latent_channels 4,8,16,32,64,128 \
@@ -50,6 +50,7 @@ python train/train_image_ub.py \
   --batchsize 16 \
   --num_workers 8 \
   --epochs 3 \
+  --lr_schedule plateau \
   --warmup 1 \
   --patience 60 \
   --checkpoint_interval 1 \

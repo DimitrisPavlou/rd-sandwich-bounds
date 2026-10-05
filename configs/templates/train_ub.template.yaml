@@ -1,0 +1,93 @@
+# =============================================================================
+# TEMPLATE: R-D UPPER BOUND, training  ->  train/train_ub.py
+# =============================================================================
+# Experiments that use this script: gaussian_ub, gaussian_ub_zy, physics_ub,
+# natural_images_*_train, natural_images_ms2020_vae_timing, smoke_natural_images.
+#
+# DOCUMENTATION template: lists EVERY flag accepted by train/train_ub.py with
+# (type, default) and a one-line description. `model` selects which architecture
+# flags matter; flags are tagged [mlp_vae] / [resnet_vae] / [ms2020_vae] / [images].
+# A flag for another model is simply ignored, so one config can sweep `model`.
+# The active values show a natural-image resnet_vae run.
+#
+# Run:   python scripts/run_sweep.py --config configs/templates/train_ub.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Convention: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b ;
+#             write learning rates as 1.0e-4, NOT 1e-4 (YAML would parse it as a string).
+# =============================================================================
+
+script: train_ub
+
+fixed:
+  # --- run / bookkeeping ---
+  checkpoint_dir: checkpoints/train_ub_template   # (str, ./checkpoints)  writes <checkpoint_dir>/<run name>/.
+  seed: 0                       # (int, 0)  RNG seed.
+  # device: cuda                # (str, null)  force device; null = cuda if available.
+  verbose: true                 # (bool, false)  -V, print per-epoch metrics.
+
+  # --- data ---
+  dataset: data/my_coco_train2017   # (str, REQUIRED)  "gaussian" | "banana" | a .npy/.npz file |
+                                #   an image directory or glob. Paths are used as given:
+                                #   inside data/ or anywhere else, e.g. /mnt/hdd/coco_train2017.
+  # data_dim: 1000              # (int, null)  required for "gaussian" (without gparams_path) and
+                                #   "banana"; inferred from the data otherwise.
+  # gparams_path: data/gaussian/gaussian_params-dim=1000.npz   # (str, null)  "gaussian" only.
+  patchsize: 256                # (int, null)  [images] random square crop size; null = whole images.
+  # max_images: 64              # (int, null)  [images] cap the number of images (smoke tests).
+  preload: true                 # (bool, false)  [images] decode all images into RAM once
+                                #   (~sum(3*H*W) bytes); forces num_workers=0.
+  num_workers: 10               # (int, 0)  DataLoader workers (finite datasets only).
+
+  # --- model ---
+  model: resnet_vae             # (str, REQUIRED)  mlp_vae | resnet_vae | ms2020_vae.
+  lambda: 0.01                  # (float, 0.01)  loss = rate + lambda * distortion. SWEPT below.
+
+  # [mlp_vae] (vector data)
+  # latent_dim: 400             # (int, null)  required unless decoder_units is [0] (Z == Y).
+  encoder_units: []             # (list[int], [])  encoder hidden widths.
+  decoder_units: []             # (list[int], [])  decoder hidden widths; [0] = no decoder (Z == Y).
+  encoder_activation: softplus  # (str, softplus)
+  decoder_activation: softplus  # (str, softplus)
+  prior_type: std_gaussian      # (str, std_gaussian)  std_gaussian | maf | gmm_<k> | gsm_<k> | lmm_<k> | lsm_<k>.
+  posterior_type: gaussian      # (str, gaussian)
+  ar_hidden_units: [10, 10]     # (list[int], [10,10])  MADE widths inside each MAF stack (prior_type: maf).
+  maf_stacks: 0                 # (int, 0)  MAF flow stacks (prior_type: maf).
+  rpd: false                    # (bool, false)  report rate per data dimension.
+  nats: false                   # (bool, false)  report rate in nats (else bits).
+
+  # [resnet_vae / ms2020_vae]
+  num_filters: 256              # (int, 256)  base conv width (paper: 256 resnet_vae / 192 ms2020_vae).
+
+  # [resnet_vae]
+  latent_channels: [4, 8, 16, 32, 64, 128]   # (list[int], [4,8,16,32,64,128])  per-level latent channels.
+  ar_prior_levels: 4            # (int, 4)  bottom levels with the channel-autoregressive prior.
+  ar_slices: 8                  # (int, 8)  channel-AR slices in that prior.
+  scale_min: 1.0e-5             # (float, 1.0e-5)  floor on every Gaussian latent scale (stability).
+
+  # [ms2020_vae]
+  latent_depth: 320             # (int, 320)  latent channels (200 ~= paper's dim(Z)=0.28 dim(X) at 256x256).
+  hyperprior_depth: 192         # (int, 192)  hyperprior channels.
+  num_slices: 10                # (int, 10)  channel-AR slices.
+  max_support_slices: 5         # (int, 5)  max previous slices each slice conditions on.
+
+  # --- optimization ---
+  batchsize: 16                 # (int, 64)
+  lr: 1.0e-4                    # (float, 1.0e-3)  Adam learning rate.
+  epochs: 2000                  # (int, 100)  finite datasets: full passes over the data;
+                                #   synthetic sources: blocks of steps_per_epoch steps.
+  # steps_per_epoch: 1000       # (int, 1000)  synthetic sources only.
+  lr_schedule: plateau          # (str, piecewise)  piecewise (x0.2 at 50/75/87.5% of epochs) |
+                                #   plateau (halve after `patience` flat epochs, once past `warmup`) | constant.
+  warmup: 1200                  # (int, 400)  [plateau] epochs before the LR may be reduced.
+  patience: 60                  # (int, 20)  [plateau] epochs without improvement before halving.
+  # grad_clip: 5000             # (float, null)  clip the global grad 2-norm.
+  skip_nonfinite: 0             # (int, 0)  skip up to N consecutive non-finite-gradient steps; 0 = abort.
+  amp: false                    # (bool, false)  mixed precision (fp16 autocast + grad scaler).
+  compile: true                 # (bool, false)  torch.compile model.get_losses (first steps compile).
+  channels_last: false          # (bool, false)  channels_last memory format.
+  checkpoint_interval: 25       # (int, null)  also checkpoint every N epochs; null = only at the end.
+  resume: true                  # (bool, false)  resume from the newest checkpoint in the run dir.
+
+sweep:
+  lambda: [0.005, 0.01, 0.02, 0.04, 0.08, 0.16]

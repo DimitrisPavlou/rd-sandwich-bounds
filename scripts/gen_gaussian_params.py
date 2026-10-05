@@ -6,11 +6,9 @@ Gaussian source's (loc, scale), for reproducible n-dimensional experiments.
 """
 import argparse
 import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rdsandwich.data import gen_gaussian_params
 

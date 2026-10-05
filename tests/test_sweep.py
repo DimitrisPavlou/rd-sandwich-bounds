@@ -1,6 +1,6 @@
 import os
 
-from rdsandwich.sweep import expand_sweep, load_config, params_to_argv
+from rdsandwich.sweep import expand_sweep, get_scripts, load_config, params_to_argv, script_params
 
 
 def test_expand_sweep_cartesian_product():
@@ -51,10 +51,27 @@ def test_load_and_expand_gaussian_config():
 
     path = os.path.join(os.path.dirname(__file__), "..", "configs", "gaussian_ub.yaml")
     config = load_config(path)
-    assert config["script"] == "train_rdub"
+    assert config["script"] == "train_ub"
     runs = expand_sweep(config)
     # length == Cartesian product of the sweep list lengths (robust to config edits)
     expected = math.prod(len(v) if isinstance(v, list) else 1 for v in config["sweep"].values())
     assert len(runs) == expected
     # lr must parse as a float (5.0e-4), not the string "5e-4"
     assert isinstance(runs[0]["lr"], float) and abs(runs[0]["lr"] - 5e-4) < 1e-12
+
+
+def test_script_list_and_script_args():
+    config = {
+        "script": ["train_lb", "eval_lb"],
+        "fixed": {"dataset": "gaussian", "num_Ck_samples": 1},
+        "sweep": {"lamb": [1, 10]},
+        "script_args": {"train_lb": {"lr": 5e-4}, "eval_lb": {"num_Ck_samples": 5}},
+    }
+    assert get_scripts(config) == ["train_lb", "eval_lb"]
+    assert get_scripts({"script": "train_ub"}) == ["train_ub"]
+    run = expand_sweep(config)[0]
+    assert script_params(config, "train_lb", run) == {
+        "dataset": "gaussian", "num_Ck_samples": 1, "lamb": 1, "lr": 5e-4}
+    # script_args override fixed/sweep, for that script only
+    assert script_params(config, "eval_lb", run)["num_Ck_samples"] == 5
+    assert "lr" not in script_params(config, "eval_lb", run)

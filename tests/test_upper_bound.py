@@ -1,8 +1,9 @@
 """Tests for the model-agnostic UpperBoundTrainer options and the UB evaluators."""
+import numpy as np
 import torch
 import torch.nn as nn
 
-from rdsandwich.data import build_loader
+from rdsandwich.data import build_loader, get_dataset
 from rdsandwich.models.upper_bound import ResNetVAE, ResNetVAEConfig
 from rdsandwich.upper_bound import UpperBoundTrainer, evaluate_full_images, evaluate_sampled
 
@@ -31,7 +32,7 @@ class _VecSrc:
 
 
 def _tiny_resnet_vae():
-    return ResNetVAE(ResNetVAEConfig(img_dim=32, latent_channels=[4, 8], num_filters=8))
+    return ResNetVAE(ResNetVAEConfig(latent_channels=[4, 8], num_filters=8))
 
 
 def test_any_get_losses_model_trains_and_saves_metadata(tmp_path):
@@ -47,6 +48,27 @@ def test_any_get_losses_model_trains_and_saves_metadata(tmp_path):
     assert set(history) >= {"loss", "rate", "mse"}
     extra = torch.load(ckpt, weights_only=False)["extra"]
     assert extra["model"] == "toy" and extra["cfg"] is None
+
+
+
+def test_external_model_on_array_file_anywhere(tmp_path):
+    """A model defined outside rdsandwich, trained on a .npy file outside data/,
+    through the same get_dataset + build_loader + UpperBoundTrainer path as train_ub."""
+    torch.manual_seed(0)
+    path = tmp_path / "elsewhere" / "my_data.npy"
+    path.parent.mkdir()
+    np.save(path, np.random.randn(256, 4).astype(np.float32))
+
+    dataset = get_dataset(str(path))
+    model = _ToyUB(dim=4)
+    trainer = UpperBoundTrainer(
+        model, build_loader(dataset, batch_size=32),
+        optimizer=torch.optim.Adam(model.parameters(), lr=1e-2), epochs=4, steps_per_epoch=0,
+        verbose=False,
+    )
+    history = trainer.train()
+    assert len(history["loss"]) == 4
+    assert history["loss"][-1] < history["loss"][0]
 
 
 def test_channels_last_training_step():

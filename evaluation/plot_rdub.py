@@ -11,7 +11,7 @@ each run leaves a folder under ``--checkpoint_dir`` containing a per-epoch
      common unit (nats per sample per dimension, as in the paper),
   4. draws one upper-bound curve per ``latent_dim``, and
   5. overlays the analytical true R(D) (for a Gaussian source, given its
-     params) and any lower-bound results (``rd-*.npz`` from train_rdlb eval).
+     params) and any lower-bound results (``rd-*.npz`` from evaluation/eval_lb.py).
 
 This reproduces the shape of Fig. 2a-top of Yang & Mandt (2022).
 
@@ -26,13 +26,11 @@ import glob
 import json
 import math
 import os
-import sys
 from collections import defaultdict
 
 import numpy as np
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rdsandwich.data import gaussian_analytical_rd
 
@@ -120,7 +118,7 @@ def analytical_curve(gparams_path, d_min, d_max, num=200):
 
 
 def collect_lb_lines(checkpoint_dir):
-    """Best-effort: read train_rdlb eval outputs (rd-*.npz) as (lambda, intercept_per_sample)."""
+    """Best-effort: read eval_lb outputs (rd-*.npz) as (lambda, intercept_per_sample)."""
     lines = []
     for npz_path in sorted(glob.glob(os.path.join(checkpoint_dir, "**", "rd-*.npz"), recursive=True)):
         try:
@@ -179,7 +177,7 @@ def main():
         Rs = [r for _, r, _ in pts]
         ax.plot(Ds, Rs, "o-", ms=4, label=f"R_U(D), {label}")
 
-    # Lower bound: each train_rdlb eval (one lambda) is a tangent line to R(D); the
+    # Lower bound: each eval_lb run (one lambda) is a tangent line to R(D); the
     # certified bound is their upper envelope (max over lambda), drawn as ONE curve
     # like the paper. Pass --lb_tangents to instead show the individual tangent lines.
     lb_lines = collect_lb_lines(args.checkpoint_dir)

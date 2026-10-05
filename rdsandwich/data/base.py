@@ -43,15 +43,19 @@ class InfiniteBatchDataset(IterableDataset):
 
 
 def build_loader(source, batch_size: int, *, shuffle: bool = True,
-                 drop_last: bool = True, num_workers: int = 0) -> DataLoader:
+                 drop_last: bool = True, num_workers: int = 0,
+                 pin_memory: bool = False) -> DataLoader:
     """Build a ``DataLoader`` of ``x`` batches from a source.
 
-    Finite map-style ``Dataset``s get a standard shuffling loader; analytic
-    sources exposing ``.sample`` are wrapped in an ``InfiniteBatchDataset``.
+    Finite map-style ``Dataset``s get a standard shuffling loader (worker
+    processes are kept alive across epochs); analytic sources exposing
+    ``.sample`` are wrapped in an ``InfiniteBatchDataset``. ``pin_memory`` only
+    makes sense for datasets whose tensors live on the CPU (e.g. image folders).
     """
     if isinstance(source, Dataset) and not isinstance(source, IterableDataset) and hasattr(source, "__len__"):
         return DataLoader(source, batch_size=batch_size, shuffle=shuffle,
-                          drop_last=drop_last, num_workers=num_workers)
+                          drop_last=drop_last, num_workers=num_workers,
+                          pin_memory=pin_memory, persistent_workers=num_workers > 0)
     if hasattr(source, "sample"):
         ds = InfiniteBatchDataset(source.sample, batch_size)
         return DataLoader(ds, batch_size=None, num_workers=num_workers)

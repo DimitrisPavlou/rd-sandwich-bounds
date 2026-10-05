@@ -1,0 +1,51 @@
+# =============================================================================
+# TEMPLATE: R-D UPPER BOUND, evaluation  ->  evaluation/eval_ub.py
+# =============================================================================
+# Experiments that use this script: natural_images_*_eval.
+#
+# DOCUMENTATION template: lists EVERY flag accepted by evaluation/eval_ub.py.
+# The model flags (and lambda / checkpoint_dir) must match the training run:
+# they determine the run directory whose newest checkpoint is loaded.
+# All model flags of train_ub.template.yaml are accepted here too; only the
+# resnet_vae ones are shown.
+#
+# Run:   python scripts/run_sweep.py --config configs/templates/eval_ub.template.yaml
+#
+# Convention: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b.
+# =============================================================================
+
+script: eval_ub
+
+fixed:
+  # --- run / bookkeeping ---
+  checkpoint_dir: checkpoints/train_ub_template   # (str, ./checkpoints)  where training wrote its run dirs.
+  seed: 0                       # (int, 0)
+  # device: cuda                # (str, null)
+  verbose: true                 # (bool, false)
+
+  # --- data (the EVAL set) ---
+  dataset: data/kodak           # (str, REQUIRED)  same forms as for training; SWEPT below.
+  # patchsize: 256              # (int, null)  [images] only needed for mode: sampled on images.
+
+  # --- model (must match training) ---
+  model: resnet_vae             # (str, REQUIRED)  mlp_vae | resnet_vae | ms2020_vae.
+  lambda: 0.01                  # (float, 0.01)  SWEPT below.
+  num_filters: 256
+  latent_channels: [4, 8, 16, 32, 64, 128]
+  ar_prior_levels: 4
+  ar_slices: 8
+
+  # --- evaluation ---
+  # ckpt: path/to/ckpt.pt       # (str, null)  explicit checkpoint; null = newest in the run dir.
+  results_dir: results/img_compression   # (str, results)  where the result .npz files go.
+  mode: auto                    # (str, auto)  full_image (per-image bpp/MSE/PSNR on whole images) |
+                                #   sampled ((D, R) mean +/- 95% CI) | auto (full_image for image folders).
+  # batchsize: 1024             # (int, 1024)  [sampled] batch size.
+  # num_batches: 100            # (int, 100)  [sampled] number of batches.
+  no_cast_xhat: false           # (bool, false)  [full_image] don't round reconstructions to uint8.
+
+sweep:
+  lambda: [0.005, 0.01, 0.02, 0.04, 0.08, 0.16]
+  dataset:
+    - data/kodak
+    - data/Tecnick_TESTIMAGES/RGB/RGB_OR_1200x1200

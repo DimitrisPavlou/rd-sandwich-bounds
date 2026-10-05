@@ -1,0 +1,78 @@
+# =============================================================================
+# TEMPLATE: R-D LOWER BOUND, train then evaluate
+#           ->  train/train_lb.py  then  evaluation/eval_lb.py
+# =============================================================================
+# Experiments that use these scripts: gaussian_lb, physics_lb.
+#
+# DOCUMENTATION template: lists EVERY flag accepted by train/train_lb.py and
+# evaluation/eval_lb.py. `script` is a list, so for every combination run_sweep
+# trains and then evaluates. Flags in `fixed` / `sweep` go to both scripts (they
+# also determine the shared run directory); flags under `script_args.<script>`
+# go to that script only. Use `script: train_lb` (or `eval_lb`) to run just one.
+#
+# Run:   python scripts/run_sweep.py --config configs/templates/lb.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Convention: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b ;
+#             write learning rates as 5.0e-4, NOT 5e-4 (YAML would parse it as a string).
+# =============================================================================
+
+script: [train_lb, eval_lb]
+
+fixed:
+  # --- run / bookkeeping ---
+  checkpoint_dir: checkpoints/lb_template   # (str, ./checkpoints)  writes <checkpoint_dir>/<run name>/.
+  seed: 0                       # (int, 0)  RNG seed (part of the run name).
+  # device: cuda                # (str, null)  force device; null = cuda if available.
+  verbose: true                 # (bool, false)  -V, print progress.
+
+  # --- data ---
+  dataset: gaussian             # (str, REQUIRED)  "gaussian" | "banana" | a .npy/.npz file |
+                                #   an image directory or glob (used as given, anywhere on disk).
+  data_dim: 16                  # (int, null)  required for "gaussian"/"banana"; inferred otherwise
+                                #   (for model: cnn, the image side length).
+  # gparams_path: null          # (str, null)  "gaussian" only: fixed non-standard params .npz.
+  # patchsize: 64               # (int, null)  [images] random square crop size.
+  # max_images: null            # (int, null)  [images] cap the number of images.
+  # preload: false              # (bool, false)  [images] decode all images into RAM once.
+  # num_workers: 0              # (int, 0)  DataLoader workers (finite datasets only).
+
+  # --- log-u network ---
+  lamb: 100.0                   # (float, REQUIRED)  slope -lambda of the tangent line. SWEPT below.
+  model: mlp                    # (str, mlp)  mlp | cnn (images).
+  units: [200, 200, 200]        # (list[int], [])  hidden widths. Leave [] to auto-size from data_dim below.
+  hidden_units_per_dim: 0       # (int, 0)  if >0 AND units is [], build num_hidden_layers layers of
+                                #   (hidden_units_per_dim * data_dim) units (paper A.5.2 uses 20 => 20n).
+  num_hidden_layers: 2          # (int, 2)
+  activation: selu              # (str, selu)
+  # kernel_dims: [9, 5, 3]      # (list[int], [])  [cnn] conv kernel sizes.
+  # in_channels: 3              # (int, 3)  [cnn] input channels.
+
+  # --- C_k estimator / inner y-optimizer ---
+  batchsize: 2048               # (int, 1024)  -k, samples per C_k estimate (part of the run name).
+  y_quick_topn: 3               # (int, 10)  candidates kept by the "quick" initializer.
+  y_steps: 500                  # (int, 500)  inner-optimization steps for y.
+  y_tol: 1.0e-6                 # (float, 1.0e-6)
+  y_lr: 1.0e-2                  # (float, 1.0e-2)
+  y_sequential: false           # (bool, false)  false = vectorized inner optimizer (fast on GPU);
+                                #   true = per-candidate sequential loop.
+  # cand_chunk: 512             # (int, null)  vectorized only: chunk the candidates to cap memory.
+  # chunksize: null             # (int, null)  chunk the pairwise-MSE computation to cap memory.
+
+script_args:
+  train_lb:
+    num_Ck_samples: 2           # (int, 1)  -M, C_k draws averaged per step.
+    y_init: quick               # (str, quick)  fast initializer during training.
+    lr: 5.0e-4                  # (float, 1.0e-4)  Adam LR for the log-u network.
+    last_step: 4000             # (int, 3000)  total training steps.
+    checkpoint_interval: 2000   # (int, 1000)  steps between checkpoints.
+    beta: 0.2                   # (float, 0.2)  EMA fraction retained for log_alpha.
+    log_E_Ck_max_delta: 1.0     # (float, 1.0)  clamp on the per-step change of log E[C_k].
+  eval_lb:
+    num_Ck_samples: 5           # (int, 5)  M for the final estimate (2M C_k samples are drawn).
+    y_init: exhaustive          # (str, exhaustive)  REQUIRED for a valid bound.
+    # ckpt: path/to/ckpt.pt     # (str, null)  explicit checkpoint; null = newest in the run dir.
+
+sweep:
+  lamb: [100, 300, 1000, 3000, 10000, 30000]
+  # data_dim: [2, 4, 8, 16]     # e.g. the gaussian_lb increasing-dimension sweep (with hidden_units_per_dim: 20).

@@ -5,7 +5,7 @@ models -- the sandwich-bounds ResNet-VAE and the Minnen & Singh 2020 beta-VAE.
 
 Only these two upper-bound curves are drawn (no operational baselines). Each
 curve is one point per lambda, read *directly* from the eval outputs written by
-``train/train_image_ub.py`` (no retraining), so the script composes cleanly with
+``evaluation/eval_ub.py`` (no retraining), so the script composes cleanly with
 the train/eval CLI:
 
     <results_dir>/rdub-model=<model>-lambda=<lambda>-dataset=<dataset>.npz

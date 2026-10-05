@@ -8,19 +8,19 @@ from rdsandwich.models.upper_bound import ResNetVAE, ResNetVAEConfig
 
 
 def _cfg(**kw):
-    base = dict(img_dim=64, latent_channels=[4, 8, 16, 32], num_filters=32)
+    base = dict(latent_channels=[4, 8, 16, 32], num_filters=32)
     base.update(kw)
     return ResNetVAEConfig(**base)
 
 
 @pytest.mark.parametrize("cfg", [
-    _cfg(ar_prior_levels=2, ar_slices=4),   # natural-image path: DeepFactorized z0 + AR prior
-    _cfg(flat_z0=True),                      # GAN path: flattened MAF prior on z0
+    _cfg(ar_prior_levels=2, ar_slices=4),   # DeepFactorized z0 + AR prior on the bottom levels
+    _cfg(),                                 # Gaussian conditional priors only
 ])
 def test_forward_backward_finite(cfg):
     torch.manual_seed(0)
     m = ResNetVAE(cfg)
-    x = torch.rand(2, 3, cfg.img_dim, cfg.img_dim) * 255.0
+    x = torch.rand(2, 3, 64, 64) * 255.0
     out = m(x)
     assert out["x_hat"].shape == x.shape
     assert out["bits"].shape == (2,)
@@ -51,7 +51,7 @@ def test_eval_runs_under_no_grad():
 
 def test_latent_to_data_dimension_ratio():
     """Sanity check the topology reproduces the paper's dim(Z) ~= 0.66 dim(X)."""
-    cfg = ResNetVAEConfig(img_dim=256, latent_channels=[4, 8, 16, 32, 64, 128])
+    cfg = ResNetVAEConfig(latent_channels=[4, 8, 16, 32, 64, 128])
     dim_z = sum(c * (256 // (2 ** (j + 1))) ** 2 for j, c in enumerate(cfg.latent_channels))
     dim_x = 256 * 256 * 3
     assert abs(dim_z / dim_x - 0.66) < 0.01
@@ -59,7 +59,7 @@ def test_latent_to_data_dimension_ratio():
 
 def test_overfits_a_fixed_batch():
     torch.manual_seed(0)
-    m = ResNetVAE(_cfg(img_dim=32, latent_channels=[4, 8, 16], ar_prior_levels=1, ar_slices=4, lmbda=0.02))
+    m = ResNetVAE(_cfg(latent_channels=[4, 8, 16], ar_prior_levels=1, ar_slices=4, lmbda=0.02))
     x = torch.rand(4, 3, 32, 32) * 255.0
     opt = torch.optim.Adam(m.parameters(), lr=2e-3)
     first = None
