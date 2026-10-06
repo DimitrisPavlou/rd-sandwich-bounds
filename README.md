@@ -219,7 +219,7 @@ port keeps that granularity (one hyperparameter combination per process), and:
   embarrassingly parallel across the `M` (`num_Ck_samples`) draws: the
   `for _ in range(M)` loop in `LowerBoundTrainer.train` is the natural place to
   fan out across devices.
-- **jsonl logs** (`rdsandwich.utils.JsonlLogger`) use the same flat, appendable
+- **jsonl logs** (`rdsandwich.utils.io.JsonlLogger`) use the same flat, appendable
   format as the original repo.
 
 ## Mapping from the original TensorFlow repo

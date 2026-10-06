@@ -14,7 +14,7 @@ from typing import Optional
 
 import torch
 
-from .config import RDLBTrainConfig
+from rdsandwich.lower_bound.config import RDLBTrainConfig
 
 
 def batch_mse(x: torch.Tensor, y: torch.Tensor, chunksize: Optional[int] = None) -> torch.Tensor:

@@ -8,8 +8,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .config import RDLBTrainConfig
-from .algorithm import run_optimize_y
+from rdsandwich.lower_bound.config import RDLBTrainConfig
+from rdsandwich.lower_bound.algorithm import run_optimize_y
 
 
 @torch.no_grad()

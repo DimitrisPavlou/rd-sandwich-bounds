@@ -1,7 +1,7 @@
 """Tests for the Minnen & Singh 2020 beta-VAE image R-D upper bound."""
 import torch
 
-from rdsandwich.models.upper_bound import MS2020VAE, MS2020VAEConfig
+from rdsandwich.models.upper_bound.ms2020_vae import MS2020VAE, MS2020VAEConfig
 
 
 def _small(**kw):

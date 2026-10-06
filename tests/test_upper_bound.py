@@ -3,9 +3,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from rdsandwich.data import build_loader, get_dataset
-from rdsandwich.models.upper_bound import ResNetVAE, ResNetVAEConfig
-from rdsandwich.upper_bound import UpperBoundTrainer, evaluate_full_images, evaluate_sampled
+from rdsandwich.data.base import build_loader
+from rdsandwich.data.datasets import get_dataset
+from rdsandwich.models.upper_bound.resnet_vae import ResNetVAE, ResNetVAEConfig
+from rdsandwich.upper_bound.trainer import UpperBoundTrainer
+from rdsandwich.upper_bound.evaluate import evaluate_full_images, evaluate_sampled
 
 
 class _ToyUB(nn.Module):

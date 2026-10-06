@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from rdsandwich.cli import PARSERS
+from rdsandwich.cli.parsers import PARSERS
 from rdsandwich.sweep import expand_sweep, get_scripts, load_config, params_to_argv, script_params
 
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "..", "configs")

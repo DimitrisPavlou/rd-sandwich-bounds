@@ -13,11 +13,11 @@ from __future__ import annotations
 import argparse
 import os
 
-from ..models.upper_bound import (
-    MS2020VAE, MS2020VAEConfig, RDUBConfig, RDUBModel, ResNetVAE, ResNetVAEConfig, check_no_decoder,
-)
-from ..utils import config_dict_to_str
-from .common import add_data_args, add_run_args, example_shape, int_list, new_parser
+from rdsandwich.models.upper_bound.ms2020_vae import MS2020VAE, MS2020VAEConfig
+from rdsandwich.models.upper_bound.mlp_vae import RDUBConfig, RDUBModel, check_no_decoder
+from rdsandwich.models.upper_bound.resnet_vae import ResNetVAE, ResNetVAEConfig
+from rdsandwich.utils.io import config_dict_to_str
+from rdsandwich.cli.common import add_data_args, add_run_args, example_shape, int_list, new_parser
 
 MODELS = ("mlp_vae", "resnet_vae", "ms2020_vae")
 

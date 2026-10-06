@@ -9,10 +9,10 @@ from __future__ import annotations
 import argparse
 import os
 
-from ..lower_bound import RDLBTrainConfig
-from ..models.lower_bound import build_log_u_model
-from ..utils import config_dict_to_str
-from .common import add_data_args, add_run_args, example_shape, int_list, new_parser
+from rdsandwich.lower_bound.config import RDLBTrainConfig
+from rdsandwich.models.lower_bound.log_u import build_log_u_model
+from rdsandwich.utils.io import config_dict_to_str
+from rdsandwich.cli.common import add_data_args, add_run_args, example_shape, int_list, new_parser
 
 
 def add_model_args(p: argparse.ArgumentParser) -> None:

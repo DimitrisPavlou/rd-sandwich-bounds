@@ -9,7 +9,7 @@ from typing import List, Optional, Sequence
 import torch
 import torch.nn as nn
 
-from .mlp import get_activation
+from rdsandwich.layers.mlp import get_activation
 
 
 def get_convnet(

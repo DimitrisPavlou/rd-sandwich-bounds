@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .gdn import GDN
+from rdsandwich.layers.gdn import GDN
 
 
 def get_activation(name: Optional[str], num_channels: Optional[int] = None) -> Optional[nn.Module]:

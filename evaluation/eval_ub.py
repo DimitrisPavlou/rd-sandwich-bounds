@@ -21,11 +21,17 @@ import numpy as np
 
 from rdsandwich.cli.common import is_image_dataset, load_dataset
 from rdsandwich.cli.upper_bound import (
-    build_eval_parser, build_model, downsampling_factor, finalize_args, get_runname, run_dir,
+    build_eval_parser,
+    build_model,
+    downsampling_factor,
+    finalize_args,
+    get_runname,
+    run_dir,
 )
-from rdsandwich.data import dataset_name
-from rdsandwich.upper_bound import evaluate_full_images, evaluate_sampled
-from rdsandwich.utils import get_device, latest_checkpoint, load_checkpoint, seed_everything
+from rdsandwich.data.datasets import dataset_name
+from rdsandwich.upper_bound.evaluate import evaluate_full_images, evaluate_sampled
+from rdsandwich.utils.torch_utils import get_device, seed_everything
+from rdsandwich.utils.io import latest_checkpoint, load_checkpoint
 
 
 def main():

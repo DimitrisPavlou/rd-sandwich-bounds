@@ -10,7 +10,7 @@ import os
 import numpy as np
 
 
-from rdsandwich.data import gen_gaussian_params
+from rdsandwich.data.gaussian import gen_gaussian_params
 
 
 def main():

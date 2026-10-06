@@ -18,8 +18,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ...layers import MAF, make_mlp
-from ...utils import SOFTPLUS_INV_1
+from rdsandwich.layers.flows import MAF
+from rdsandwich.layers.mlp import make_mlp
+from rdsandwich.utils.torch_utils import SOFTPLUS_INV_1
 
 
 @dataclass

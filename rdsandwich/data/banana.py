@@ -5,7 +5,7 @@ import math
 
 import torch
 
-from .base import Source
+from rdsandwich.data.base import Source
 
 
 class BananaSource(Source):

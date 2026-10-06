@@ -4,7 +4,8 @@ from __future__ import annotations
 import argparse
 from typing import List
 
-from ..data import ImageFolderDataset, get_dataset
+from rdsandwich.data.image import ImageFolderDataset
+from rdsandwich.data.datasets import get_dataset
 
 
 def int_list(s: str) -> List[int]:

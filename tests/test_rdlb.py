@@ -2,15 +2,13 @@ import math
 
 import torch
 
-from rdsandwich.layers import make_mlp
-from rdsandwich.lower_bound import (
-    LowerBoundTrainer,
-    RDLBTrainConfig,
-    compute_Ck_obj,
-    estimate_R_lower_bound,
-    optimize_y,
-)
-from rdsandwich.data import GaussianSource, build_loader
+from rdsandwich.layers.mlp import make_mlp
+from rdsandwich.lower_bound.trainer import LowerBoundTrainer
+from rdsandwich.lower_bound.config import RDLBTrainConfig
+from rdsandwich.lower_bound.algorithm import compute_Ck_obj, optimize_y
+from rdsandwich.lower_bound.evaluate import estimate_R_lower_bound
+from rdsandwich.data.gaussian import GaussianSource
+from rdsandwich.data.base import build_loader
 
 
 def test_optimize_y_quick_runs():
@@ -65,7 +63,7 @@ def test_lower_bound_trainer_on_finite_dataset():
     """The LB loop pulls batches with _next_batch(); it must also work on finite
     (map-style) datasets such as .npy arrays or image folders, not only on
     infinite synthetic sources."""
-    from rdsandwich.data import ArraySource
+    from rdsandwich.data.array import ArraySource
 
     torch.manual_seed(0)
     data = ArraySource(torch.randn(64, 2).numpy())

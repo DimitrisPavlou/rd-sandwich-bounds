@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .base import Source
+from rdsandwich.data.base import Source
 
 
 class ArraySource(Source, Dataset):

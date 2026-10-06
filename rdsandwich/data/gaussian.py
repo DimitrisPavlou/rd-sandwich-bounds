@@ -6,7 +6,7 @@ import math
 import numpy as np
 import torch
 
-from .base import Source
+from rdsandwich.data.base import Source
 
 
 class GaussianSource(Source):

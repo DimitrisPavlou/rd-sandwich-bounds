@@ -6,7 +6,7 @@ import math
 import torch
 import torch.nn.functional as F
 
-from ...utils import SOFTPLUS_INV_1
+from rdsandwich.utils.torch_utils import SOFTPLUS_INV_1
 
 LN2 = math.log(2.0)
 LOG2PI = math.log(2.0 * math.pi)

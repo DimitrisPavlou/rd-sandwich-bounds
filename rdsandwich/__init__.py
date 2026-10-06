@@ -23,5 +23,3 @@ evaluators) in ``rdsandwich.upper_bound`` / ``rdsandwich.lower_bound``, and data
 loading in ``rdsandwich.data``. See the top-level README.md for the layout, the
 CLIs in ``train/`` and ``evaluation/``, and how to add a model.
 """
-
-__version__ = "0.1.0"

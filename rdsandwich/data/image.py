@@ -30,7 +30,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from .base import Source
+from rdsandwich.data.base import Source
 
 
 def _read_uint8(path: str) -> torch.Tensor:

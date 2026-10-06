@@ -4,7 +4,7 @@ import math
 import pytest
 import torch
 
-from rdsandwich.models.upper_bound import ResNetVAE, ResNetVAEConfig
+from rdsandwich.models.upper_bound.resnet_vae import ResNetVAE, ResNetVAEConfig
 
 
 def _cfg(**kw):

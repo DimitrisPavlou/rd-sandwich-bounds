@@ -5,8 +5,8 @@ import pytest
 import torch
 import torch.nn as nn
 
-from rdsandwich.data import build_loader
-from rdsandwich.utils import BaseTrainer, WarmupReduceLROnPlateau
+from rdsandwich.data.base import build_loader
+from rdsandwich.utils.trainer import BaseTrainer, WarmupReduceLROnPlateau
 
 
 class _Src:
@@ -139,7 +139,7 @@ def test_grad_norm_logging_and_clip_frac():
 def test_latest_checkpoint_skips_explosion_dumps(tmp_path):
     import time
 
-    from rdsandwich.utils import latest_checkpoint
+    from rdsandwich.utils.io import latest_checkpoint
 
     (tmp_path / "ckpt-lambda=0.01.pt").write_bytes(b"x")
     time.sleep(0.01)

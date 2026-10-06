@@ -43,8 +43,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ...layers import DeepFactorized, GDN
-from ._common import LN2, normal_log_prob, softplus_scale
+from rdsandwich.layers.deep_factorized import DeepFactorized
+from rdsandwich.layers.gdn import GDN
+from rdsandwich.models.upper_bound._common import LN2, normal_log_prob, softplus_scale
 
 
 # --------------------------------------------------------------------------- #

@@ -11,7 +11,8 @@ from typing import Sequence
 
 import torch.nn as nn
 
-from ...layers import get_convnet, make_mlp
+from rdsandwich.layers.conv import get_convnet
+from rdsandwich.layers.mlp import make_mlp
 
 
 def build_log_u_model(

@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 
-from rdsandwich.data import gaussian_analytical_rd
+from rdsandwich.data.gaussian import gaussian_analytical_rd
 
 LN2 = math.log(2.0)
 

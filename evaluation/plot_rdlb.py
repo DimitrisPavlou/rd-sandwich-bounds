@@ -45,7 +45,7 @@ from collections import defaultdict
 import numpy as np
 
 
-from rdsandwich.data import gaussian_analytical_rd
+from rdsandwich.data.gaussian import gaussian_analytical_rd
 
 
 def _parse_token(name: str, key: str):

@@ -14,7 +14,7 @@ import numpy as np
 
 
 from rdsandwich.utils.ba import discretize_and_run_ba
-from rdsandwich.utils import MyJSONEncoder, config_dict_to_str
+from rdsandwich.utils.io import MyJSONEncoder, config_dict_to_str
 
 
 def main():

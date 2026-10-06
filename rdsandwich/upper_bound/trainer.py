@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 import torch._dynamo  # noqa: F401 (for torch._dynamo.config, used to raise the recompile limit)
 
-from ..utils import BaseTrainer
+from rdsandwich.utils.trainer import BaseTrainer
 
 
 def lr_lambda_schedule(epoch: int, epochs: int, decay_factor: float = 0.2) -> float:

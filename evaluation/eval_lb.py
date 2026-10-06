@@ -16,9 +16,16 @@ import os
 import numpy as np
 
 from rdsandwich.cli.common import load_dataset
-from rdsandwich.cli.lower_bound import build_eval_parser, build_model, ck_config, finalize_args, run_dir
-from rdsandwich.lower_bound import estimate_R_lower_bound
-from rdsandwich.utils import get_device, latest_checkpoint, load_checkpoint, seed_everything
+from rdsandwich.cli.lower_bound import (
+    build_eval_parser,
+    build_model,
+    ck_config,
+    finalize_args,
+    run_dir,
+)
+from rdsandwich.lower_bound.evaluate import estimate_R_lower_bound
+from rdsandwich.utils.torch_utils import get_device, seed_everything
+from rdsandwich.utils.io import latest_checkpoint, load_checkpoint
 
 
 def main():

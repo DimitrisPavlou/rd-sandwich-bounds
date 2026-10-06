@@ -3,10 +3,12 @@ import pytest
 import torch
 from PIL import Image
 
-from rdsandwich.data import (
-    ArraySource, BananaSource, GaussianSource, ImageFolderDataset, NdBananaEmbedder,
-    build_loader, dataset_name, gaussian_analytical_rd, gen_gaussian_params, get_dataset,
-)
+from rdsandwich.data.array import ArraySource
+from rdsandwich.data.banana import BananaSource, NdBananaEmbedder
+from rdsandwich.data.gaussian import GaussianSource, gaussian_analytical_rd, gen_gaussian_params
+from rdsandwich.data.image import ImageFolderDataset
+from rdsandwich.data.base import build_loader
+from rdsandwich.data.datasets import dataset_name, get_dataset
 
 
 def test_gaussian_source_shape():

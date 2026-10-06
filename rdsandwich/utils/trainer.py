@@ -21,7 +21,7 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import IterableDataset
 
-from .io import JsonlLogger, MyJSONEncoder, get_time_str, latest_checkpoint, load_checkpoint, save_checkpoint
+from rdsandwich.utils.io import JsonlLogger, MyJSONEncoder, get_time_str, latest_checkpoint, load_checkpoint, save_checkpoint
 
 
 class WarmupReduceLROnPlateau:
