@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 """Plot the image R-D upper bound (R vs. D) and quality-rate (PSNR vs. bpp)
-curves directly from the per-epoch training logs of ``train/train_image_ub.py``.
+curves directly from the per-epoch training logs of ``train/train_ub.py``.
 
 Use this when only the ``record-*.jsonl`` logs are available (no eval npz on
 Kodak/Tecnick). Each ``rdub-model=<model>-lambda=<lambda>-...`` run folder
 gives one point: rate (bpp) and MSE (on the [0, 255] scale) averaged over the
-last ``--last_n`` epochs. PSNR is computed from that mean MSE.
+last ``--last_n`` epochs. PSNR is computed from that mean MSE. A
+``rdub-model=<model>-range=pm1-lambda=...`` folder counts as its own curve
+(``<model>-range=pm1``); variable-rate runs (``variable_rate_lossy_vae``) are skipped, since
+their training logs average over randomly drawn lambdas.
 
 Note: these are *training-set* numbers (random crops, continuous relaxation),
 not the held-out eval that ``evaluation/plot_qr.py`` plots.
@@ -25,7 +28,10 @@ from collections import defaultdict
 
 import numpy as np
 
-_RUN_RE = re.compile(r"rdub-model=(?P<model>[^-]+)-lambda=(?P<lmbda>[0-9.eE+-]+?)(?:-|$)")
+# <model>[-range=<range>]-lambda=<lambda>; variable-rate runs (no lambda in the name,
+# training logs averaged over random lambdas) do not match and are skipped.
+_RUN_RE = re.compile(r"rdub-model=(?P<model>[^-]+(?:-range=[^-]+)?)"
+                     r"-lambda=(?P<lmbda>[0-9.]+(?:[eE][+-]?[0-9]+)?)(?:-|$)")
 
 
 def _load_records(run_dir):
@@ -41,7 +47,10 @@ def collect_points(checkpoint_dir, last_n):
     curves = defaultdict(list)
     for run_dir in sorted(glob.glob(os.path.join(checkpoint_dir, "rdub-*"))):
         m = _RUN_RE.match(os.path.basename(run_dir))
-        recs = _load_records(run_dir) if m else []
+        if not m:
+            print(f"  (skipping {os.path.basename(run_dir)}: not a fixed-lambda run)")
+            continue
+        recs = _load_records(run_dir)
         if not recs:
             print(f"  (skipping {os.path.basename(run_dir)}: no jsonl log)")
             continue

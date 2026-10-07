@@ -1,0 +1,63 @@
+# =============================================================================
+# TEMPLATE: R-D UPPER BOUND, evaluation  ->  evaluation/eval_ub.py   (model: resnet_vae)
+# =============================================================================
+# Evaluates trained ResNet-VAE checkpoints on whole test images (Kodak, Tecnick):
+# per-image bpp, MSE and PSNR on the [0, 255] scale (unrounded and 8-bit-rounded),
+# written to <results_dir>/rdub-model=<key>-lambda=<lambda>-dataset=<name>.npz for
+# evaluation/plot_qr.py. Experiments: images/resnet_vae_eval_ub*.yaml.
+#
+# Lists EVERY flag evaluation/eval_ub.py accepts for this model, as (type, default)
+# plus a one-line description, in three sections: 1. data, 2. model, 3. evaluation.
+# The model flags (with lambda and checkpoint_dir) must match the training run:
+# they determine the run directory whose newest checkpoint is loaded.
+#
+# Run:   python scripts/run_sweep.py --config configs/templates/images/resnet_vae_eval_ub.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Conventions: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b ;
+#              quote "0_255" (unquoted, YAML reads it as an octal number).
+# =============================================================================
+
+script: eval_ub
+
+fixed:
+  # ===== 1. data =============================================================
+  # dataset: SWEPT below        # (str, REQUIRED)  test images: a directory or glob, used as given.
+  # max_images: null            # (int, null)  use only the first N images (quick checks).
+  # patchsize: null             # (int, null)  [mode: sampled only] crop size; full-image eval uses whole images.
+  # hflip: false                # (bool, false)  [mode: sampled only] mirror the sampled crops.
+  # small_image_mode: resize    # (str, resize)  [mode: sampled only] images smaller than patchsize.
+  # preload: false              # (bool, false)  decode every image into RAM once.
+  # num_workers: 0              # (int, 0)  DataLoader worker processes (unused by full-image eval).
+  # data_dim: null              # (int, null)  vector data only; unused for images.
+  # gparams_path: null          # (str, null)  "gaussian" source only; unused for images.
+
+  # ===== 2. model (must match the training run) ==============================
+  model: resnet_vae             # (str, REQUIRED)  mlp_vae | resnet_vae | ms2020_vae | variable_rate_lossy_vae.
+  # lambda: SWEPT below         # (float, 0.01)  the training run's lambda (selects its checkpoint).
+  image_range: pm1              # (str, 0_255)  the training run's "0_255" | pm1 (also part of the run name).
+  num_filters: 256              # (int, 256)  channels of every encoder / decoder convolution.
+  latent_channels: [4, 8, 16, 32, 64, 128]  # (list[int], [4,8,16,32,64,128])  latent channels per level.
+  ar_prior_levels: 4            # (int, 4)  finest levels with the channel-wise autoregressive prior.
+  ar_slices: 8                  # (int, 8)  channel slices in that autoregressive prior.
+  scale_min: 1.0e-5             # (float, 1.0e-5)  floor on every Gaussian latent scale.
+
+  # ===== 3. evaluation =======================================================
+  checkpoint_dir: checkpoints/templates   # (str, ./checkpoints)  where the training run wrote its run directory.
+  # ckpt: path/to/ckpt.pt       # (str, null)  evaluate this checkpoint file instead of the newest one.
+  no_ema: false                 # (bool, false)  use the raw weights even if the checkpoint has EMA weights.
+  results_dir: results/templates   # (str, results)  where the result .npz files are written.
+  mode: auto                    # (str, auto)  full_image (per-image bpp/MSE/PSNR on whole images) |
+                                #   sampled ((D, R) mean +/- 95% CI over random batches) |
+                                #   auto (full_image for image folders, sampled otherwise).
+  # batchsize: 1024             # (int, 1024)  [mode: sampled only] batch size.
+  # num_batches: 100            # (int, 100)  [mode: sampled only] number of batches.
+  seed: 0                       # (int, 0)  random seed (the latents are sampled).
+  # device: cuda                # (str, null)  e.g. cuda, cuda:1, cpu; null = cuda if available.
+  verbose: true                 # (bool, false)  print progress.
+
+sweep:
+  lambda: [8, 22.6, 64, 181, 512, 1448]   # model section: one checkpoint per lambda
+  dataset:                                 # data section: the test sets
+    - data/kodak
+    - data/Tecnick_TESTIMAGES/RGB/RGB_OR_1200x1200

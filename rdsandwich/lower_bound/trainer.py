@@ -1,4 +1,4 @@
-"""Lower-bound trainer (Algorithm 1) and the final R_L(D) evaluator.
+"""Lower-bound trainer (Algorithm 1).
 
 Unlike the upper bound, the LB loop does not fit ``BaseTrainer``'s
 ``train_step`` shape: it is step-based, logs every step, checkpoints at
@@ -7,37 +7,22 @@ maintains an alpha EMA (with a warm-up step), and differentiates through the
 inner maximization via an envelope theorem. So ``LowerBoundTrainer`` reuses
 ``BaseTrainer``'s plumbing (model/optimizer/loader state, ``_next_batch``,
 logging/checkpoint helpers) but **overrides ``train()``** with the Algorithm-1
-loop; ``train_step`` is intentionally unused.
+loop; ``train_step`` is intentionally unused. The final R_L(D) estimator
+lives in ``evaluate.py``.
 """
 from __future__ import annotations
 
 import math
 from typing import Optional
 
-import numpy as np
 import torch
 import torch.nn as nn
 
-from ..utils import BaseTrainer, ema_update, lower_bound as lb_clip, save_checkpoint, upper_bound as ub_clip
-from .algorithm import compute_Ck_obj, optimize_y, optimize_y_vectorized
-from .config import RDLBTrainConfig
-
-
-def _run_optimize_y(cfg: RDLBTrainConfig, log_u_fun, x, lamb):
-    """Dispatch to the sequential or vectorized inner optimizer per ``cfg``.
-
-    Vectorized is the default (much faster on GPU); ``cfg.y_sequential=True``
-    falls back to the per-candidate loop, and ``cfg.cand_chunk`` bounds the
-    vectorized path's memory for image data (ignored when sequential).
-    """
-    common = dict(
-        num_steps=cfg.y_steps, lr=cfg.y_lr, tol=cfg.y_tol,
-        init=cfg.y_init, quick_topn=cfg.y_quick_topn, chunksize=cfg.chunksize,
-        verbose=False,
-    )
-    if cfg.y_sequential:
-        return optimize_y(log_u_fun, x, lamb, **common)
-    return optimize_y_vectorized(log_u_fun, x, lamb, cand_chunk=cfg.cand_chunk, **common)
+from rdsandwich.utils.trainer import BaseTrainer
+from rdsandwich.utils.torch_utils import ema_update, lower_bound as lb_clip, upper_bound as ub_clip
+from rdsandwich.utils.io import save_checkpoint
+from rdsandwich.lower_bound.algorithm import compute_Ck_obj, run_optimize_y
+from rdsandwich.lower_bound.config import RDLBTrainConfig
 
 
 class LowerBoundTrainer(BaseTrainer):
@@ -80,7 +65,7 @@ class LowerBoundTrainer(BaseTrainer):
             for _ in range(M):
                 x = self._next_batch()  # [k, *dims] on device
                 x_batches.append(x)
-                res = _run_optimize_y(cfg, model, x, lamb)
+                res = run_optimize_y(cfg, model, x, lamb)
                 opt_ys.append(res["opt_y"])
                 log_Ck_samples.append(res["opt_log_supobj"])
 
@@ -130,39 +115,3 @@ class LowerBoundTrainer(BaseTrainer):
         if logger:
             logger.close()
         return model
-
-
-@torch.no_grad()
-def estimate_R_lower_bound(log_u_model: nn.Module, source, lamb: float, cfg: RDLBTrainConfig, device=None):
-    """Final evaluation (``est_R_``). Uses 2M samples of C_k — the first M set the
-    log expansion point alpha, the second M (with fresh log_u samples) estimate
-    the objective xi (Eq. 15). Should be run with ``cfg.y_init == 'exhaustive'``.
-
-    ``source`` is any object exposing ``.sample(batchsize) -> Tensor``.
-    """
-    import time
-
-    device = device or next(log_u_model.parameters()).device
-    M = cfg.num_Ck_samples
-    assert M >= 1
-    total = 2 * M
-    log_Ck_samples, E_log_us = [], []
-    t_start = time.perf_counter()
-    for i in range(total):
-        x = source.sample(cfg.batchsize).to(device)
-        res = _run_optimize_y(cfg, log_u_model, x, lamb)
-        log_Ck_samples.append(res["opt_log_supobj"])
-        E_log_us.append(log_u_model(x).mean().item())
-        # Post-processing (exhaustive-optimizer eval) is the slow part: 2M full
-        # hill-climbs. Report progress + ETA so the wait is legible.
-        elapsed = time.perf_counter() - t_start
-        eta = elapsed / (i + 1) * (total - i - 1)
-        print(f"  [eval C_k] sample {i + 1}/{total}  elapsed={elapsed:.1f}s  eta={eta:.1f}s", flush=True)
-
-    E_log_us = np.array(E_log_us)
-    log_Ck_samples = np.array(log_Ck_samples)
-    log_alpha = torch.logsumexp(torch.tensor(log_Ck_samples[:M]), dim=0).item() - math.log(M)
-    xi_samples = -E_log_us[M:] - np.exp(log_Ck_samples[M:] - log_alpha) - log_alpha + 1
-    R_ = float(np.mean(xi_samples))
-    return dict(R_=R_, xi_samples=xi_samples, log_alpha=log_alpha,
-                E_log_us=E_log_us, log_Ck_samples=log_Ck_samples)

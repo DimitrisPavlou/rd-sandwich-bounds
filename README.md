@@ -6,16 +6,14 @@ A PyTorch re-implementation of
 > Rate-Distortion Function.** ICLR 2022. https://arxiv.org/abs/2111.12166
 
 ported from the original TensorFlow / `tensorflow-compression` codebase
-(`RD-sandwich-master`), and reorganized into an installable library +
-CLI scripts, so the three core algorithms can be reused, tested, and scaled
-independently of any one experiment.
+(`RD-sandwich-master`), and reorganized into an installable library + CLI
+scripts, so the core algorithms can be reused, tested, and applied to new
+models and data without touching the training or evaluation code.
 
 ## Install
 
 ```bash
-cd rd_reproduce
-pip install -e .                 # core (Gaussian/banana/physics/speech experiments)
-pip install -e ".[images]"       # + compressai, pytorch-pretrained-biggan (GAN/image experiments)
+pip install -e .                 # the rdsandwich package + its dependencies
 pip install -e ".[dev]"          # + pytest, matplotlib
 ```
 
@@ -25,131 +23,199 @@ Requires Python >= 3.9, PyTorch >= 2.0. Run the test suite with:
 pytest tests/ -q
 ```
 
+The scripts import the `rdsandwich` package, so install it (editable) first.
+The shell scripts in `experiments/` and `scripts/slurm/` instead put the repo on
+`PYTHONPATH` themselves, so they also run in an environment without the install.
+
 ## Project layout
 
 ```
 rdsandwich/                  installable package
-  models/                    generic neural-network classes only
-    mlp.py                   make_mlp / get_activation (re-exports GDN)
-    gdn.py                   GDN/IGDN + NonNegativeParameterizer (tfc-faithful)
-    conv.py                  get_convnet (lower-bound image log-u model)
-    flows.py                 MADE-based Masked Autoregressive Flow (flow prior)
-    deep_factorized.py       Ballé-2018 deep factorized density (image hyperprior)
-    channelwise_ar.py        channel-wise autoregressive (IAF) transform
-  dataloader/                data sources + the DataLoader factory
-    base.py                  Source, build_loader, InfiniteBatchDataset
-    gaussian.py              Gaussian source, analytical R(D), param generator
-    banana.py                2D "banana" source (+ n-d embeddings)
-    array.py                 physics/speech .npy/.npz datasets
-    image.py                 image-folder / patch-sampling source
-  utils/                     shared infrastructure + classical approaches
-    io.py                    jsonl logging, checkpointing, run-naming
-    torch_utils.py           seeding, device, numeric helpers
-    trainer.py               BaseTrainer + WarmupReduceLROnPlateau (AMP, grad clip, resume)
-    ba.py                    Blahut-Arimoto reference algorithm
-  upper_bound/               R-D UPPER BOUND
-    config.py                RDUBConfig
-    model.py                 RDUBModel (beta-VAE) + priors
-    trainer.py               UpperBoundTrainer + (D,R) evaluator + LR schedule
-  lower_bound/               R-D LOWER BOUND
+  models/                    everything that gets TRAINED, grouped by bound
+    upper_bound/             beta-VAEs; each has get_losses(x) -> (loss, rate, distortion)
+      mlp_vae.py             RDUBConfig / RDUBModel: MLP beta-VAE for vector data (+ priors)
+      resnet_vae.py          hierarchical ResNet-VAE for images (bidirectional inference)
+      ms2020_vae.py          Minnen & Singh 2020 beta-VAE for images (channel-AR prior)
+      variable_rate_lossy_vae.py  Duan et al. 2023 variable-rate ResNet-VAE (one model for all lambda)
+      _common.py             Gaussian-latent helpers shared by the image models
+    lower_bound/
+      log_u.py               build_log_u_model: mlp / cnn log-u networks
+  layers/                    generic building blocks the models are made of
+    mlp.py gdn.py conv.py flows.py deep_factorized.py channelwise_ar.py
+    convnext_adaln.py        lambda-conditioned ConvNeXt blocks (AdaLN) of the variable-rate model
+  upper_bound/               HOW the upper bound is trained and evaluated
+    trainer.py               UpperBoundTrainer (any get_losses model; compile / channels_last)
+    evaluate.py              evaluate_sampled ((D, R) +/- 95% CI), evaluate_full_images (Kodak/Tecnick)
+  lower_bound/               HOW the lower bound is trained and evaluated
     config.py                RDLBTrainConfig
-    model.py                 build_log_u_model (log-u network factory)
-    algorithm.py             batch_mse / compute_Ck_obj / optimize_y (C_k estimator)
-    trainer.py               LowerBoundTrainer (overrides train()) + est_R_ evaluator
-  resnet_vae.py              hierarchical ResNet-VAE for image UB (bidirectional inference)
-  ms2020_vae.py              Minnen&Singh-2020 beta-VAE for image UB (channel-AR prior)
-  compression_baselines.py   CompressAI mbt2018 / ms2020 baselines (pending; to be replaced by downloaded curves)
-  biggan.py                  BigGAN-backed GAN-image source (pending)
-  config.py                  YAML sweep loader (expand_sweep / params_to_argv)
-train/                       training CLIs (train_rdub / train_rdlb / train_resnet_vae)
-evaluation/                  plotting + evaluation (plot_rdub.py)
-scripts/                     misc CLIs (gen_gaussian_params, prepare_imgs, run_ba, run_sweep)
-configs/                     YAML experiment configs (parameter sweeps)
-data/                        generated / prepared data
+    algorithm.py             batch_mse / compute_Ck_obj / optimize_y / run_optimize_y (C_k estimator)
+    trainer.py               LowerBoundTrainer (Algorithm 1)
+    evaluate.py              estimate_R_lower_bound (est_R_)
+  data/                      get_dataset(spec) + build_loader, and the sources:
+    gaussian.py banana.py    synthetic sources
+    array.py                 .npy/.npz datasets (physics, speech, ...)
+    image.py                 ImageFolderDataset (patches for training, whole images for eval)
+  utils/                     BaseTrainer (+ EMA of the weights), LR schedules (lr_schedulers.py),
+                             logging/checkpointing, seeding, Blahut-Arimoto (ba.py)
+  cli/                       argument parsing / model building / run naming shared by the CLIs
+  sweep.py                   YAML sweep configs (expand_sweep / script_params / params_to_argv)
+train/                       train_ub.py, train_lb.py
+evaluation/                  eval_ub.py, eval_lb.py + plotting (plot_rdub, plot_rdlb, plot_qr, ...)
+scripts/                     run_sweep, gen_gaussian_params, prepare_imgs, run_ba, slurm/
+configs/                     YAML experiment configs by data source: gaussian/ physics/ images/,
+                             named <model>_<train|eval>_<ub|lb>[_<variant>].yaml; templates/
+                             mirrors the source folders, one template per (model, script)
+experiments/                 shell scripts reproducing the paper's sweeps
+docs/figures/                model diagrams
+data/                        generated / prepared data (git-ignored)
 tests/                       pytest suite
 ```
 
-> Refactor status: the **upper and lower bounds** have been reorganized into
-> `upper_bound/` and `lower_bound/` (each: config / model / trainer) on top of
-> the shared `models/`, `dataloader/`, and `utils/` subpackages. Both trainers
-> subclass `utils/trainer.py`'s `BaseTrainer` — `UpperBoundTrainer` fills its
-> `train_step` hook, while `LowerBoundTrainer` overrides `train()` for the
-> step-based Algorithm-1 loop. The image models (`resnet_vae.py`, `biggan.py`,
-> `compression_baselines.py`) still live as flat modules pending their own slice.
+## How the pieces fit
 
-## Mapping from the original TensorFlow repo
-
-| Original file | Ported to | Notes |
+| | Upper bound | Lower bound |
 |---|---|---|
-| `rdub_mlp.py` | `rdsandwich/upper_bound/`, `train/train_rdub.py` | Full port: `gaussian`/`gmm_k`/`gsm_k`/`lmm_k`/`lsm_k`/`maf`/`std_gaussian` priors, optional decoder (Z==Y support), MLP encoder/decoder. The `'deep'` (DeepFactorized) prior and `posterior_type='uniform'` (used only for the NTC quantization baseline) are **not ported** — see `compression_baselines.py` for an NTC-equivalent baseline instead. |
-| `rdlb.py` | `rdsandwich/lower_bound/`, `train/train_rdlb.py` | Full port of `compute_Ckobj`/`batch_mse`/`optimize_y`/the Algorithm-1 outer loop/`est_R_`. `--anneal_lamb` (single-run lambda sweep) is not ported; run one `--lamb` per invocation, as `experiments/*.sh` does. |
-| `ba.py` | `rdsandwich/utils/ba.py`, `scripts/run_ba.py` | Near-verbatim port — the original was already NumPy/SciPy only. |
-| `nn_models.py` | `rdsandwich/models/` (`mlp.py`, `conv.py`) | `make_mlp`/`get_activation`/GDN in `mlp.py`; `get_convnet` in `conv.py`. |
-| `ntc_sources.py` | `rdsandwich/dataloader/` | `get_banana`/`get_nd_banana` -> `BananaSource`/`NdBananaEmbedder` (in `banana.py`), reproducing the same sequence of (inverted) transforms; `build_loader` turns any source into a `DataLoader`. |
-| `gen_gaussian_params.py` | `scripts/gen_gaussian_params.py` | Direct port. |
-| `prepare_imgs.py` | `scripts/prepare_imgs.py` | Direct port (Pillow instead of `tf.image`). |
-| `resnet_vae.py` | `rdsandwich/resnet_vae.py`, `train/train_resnet_vae.py` | **Full port.** A hierarchical ResNet-VAE with GDN residual encoder/decoder blocks (Cheng et al. 2020), true **bidirectional inference** at each `LatentBlock` (bottom-up + top-down posterior, optionally parameterized relative to the prior), a **channel-wise autoregressive (IAF) prior** on the bottom `--ar_prior_levels` generative levels, and a per-channel **deep factorized** prior on the top latent `z0` (or a flattened MAF with `--flat_z0`, for the GAN experiments). This is the `dim(Z) ≈ 0.66 dim(X)` model of Sec. 6.3/6.4. |
-| `ms2020.py` (β-VAE variant) | `rdsandwich/ms2020_vae.py` | **Ported architecture, β-VAE recipe.** The Minnen & Singh 2020 channel-autoregressive autoencoder (analysis/synthesis/hyper transforms per Ballé 2018 Table 1, 10 channel slices with LRP), converted to an R-D **upper-bound** β-VAE per the paper's App. A.5.7: factorized-Gaussian posteriors with learned means/variances, a deep factorized hyperprior **not** convolved with a uniform, and a Gaussian channel-conditional prior. The authors' public repo ships only the *operational* `ms2020.py` (rounding/entropy-coded, used as a baseline); the β-VAE upper-bound variant (`rdub-model=ms2020_vae`) had no released code, so this is reconstructed from the architecture + paper. |
-| `mbt2018.py`, `ms2020.py` (operational baselines), `biggan.py` | `rdsandwich/compression_baselines.py`, `rdsandwich/biggan.py` | **Baseline comparison curves are not retrained.** The operational Q-R curves (Minnen 2018/2020, VTM, BPG, JPEG2000, …) in Fig. 3 are published numbers; they will be downloaded from the `tensorflow/compression` and CompressAI results directories rather than retrained (Phase 0 — replacing `compression_baselines.py`). `biggan.py` (GAN-image source for Sec. 6.3) still wraps `pytorch-pretrained-biggan`. |
-| `boilerplate.py` | — | Keras-training-loop plumbing (LR schedules, callbacks); superseded by `rdsandwich/utils/trainer.py`'s `BaseTrainer` and the per-bound trainer subclasses. |
-| `utils.py` | `rdsandwich/utils/` (`io.py`, `torch_utils.py`) | jsonl logging (`get_json_logging_callback` -> `JsonlLogger`), `config_dict_to_str`, checkpoint helpers replacing `model.save_weights`/`load_weights`; re-exported from `rdsandwich.utils`. |
+| models | `rdsandwich.models.upper_bound` | `rdsandwich.models.lower_bound` |
+| trainer | `UpperBoundTrainer` | `LowerBoundTrainer` |
+| evaluator | `evaluate_sampled` / `evaluate_full_images` | `estimate_R_lower_bound` |
+| training CLI | `train/train_ub.py --model {mlp_vae,resnet_vae,ms2020_vae,variable_rate_lossy_vae}` | `train/train_lb.py --model {mlp,cnn}` |
+| evaluation CLI | `evaluation/eval_ub.py` | `evaluation/eval_lb.py` |
 
-## Quickstart: reproduce the n=1000 Gaussian sandwich bound
+Training and evaluation are separate scripts. An evaluation CLI takes the same
+model flags (and `--checkpoint_dir`, `--lambda`/`--lamb`) as training: they
+determine the run directory, whose newest checkpoint is loaded (or pass `--ckpt`).
+
+### Data: `--dataset`
+
+Every CLI takes `--dataset`, which is one of
+
+- `gaussian` or `banana`: a synthetic source (sampled on demand; needs `--data_dim`,
+  or `--gparams_path` for a fixed non-standard Gaussian);
+- a **path**, used exactly as given, relative or absolute, inside `data/` or
+  anywhere else on disk (e.g. a large dataset on another drive):
+  - a `.npy` / `.npz` file: rows are samples (`--data_dim` is inferred);
+  - an image directory or glob: random `--patchsize` crops for training, whole
+    images for full-image evaluation (`--preload` decodes them into RAM once;
+    `--hflip` mirrors training crops; `--small_image_mode reflect_pad` mirror-pads
+    images smaller than the crop instead of stretching them).
+
+### Adding a new upper-bound model
+
+1. Write it in `rdsandwich/models/upper_bound/` as an `nn.Module` with
+   `get_losses(x) -> (loss, rate, distortion)`. That is all
+   `UpperBoundTrainer` needs. For full-image evaluation, `forward(x)` must also
+   return a dict with `x_hat` and per-image `bits`. Image models follow one
+   output contract whatever range their loss uses internally: `x` comes in on
+   [0, 255], `x_hat` goes out on [0, 255], `bits` are in bits, and `get_losses`
+   returns the rate in bpp and the MSE on the [0, 255] scale
+   (`tests/test_image_model_contract.py`), so evaluation and plots report bpp
+   and PSNR the same way for every model. Optionally, a
+   `diagnostics(x) -> dict` method adds model statistics to the trainer's
+   explosion report (written when the loss or gradients become non-finite).
+2. In `rdsandwich/cli/upper_bound.py`, add its name to `MODELS`, its flags to
+   `add_model_args`, and a branch to `build_model` (plus `downsampling_factor`
+   for an image model, and entries in `model_key` / `get_runname` if its curve
+   needs more than the model name).
+3. Add `<model>_train_ub.template.yaml` and `<model>_eval_ub.template.yaml` to
+   `configs/templates/<source>/` (`tests/test_configs.py` checks they list every flag).
+
+The data loading, trainer, evaluators, sweep runner and plots then work unchanged.
+
+## Quickstart: the n=1000 Gaussian sandwich bound
 
 ```bash
 # 1. Generate the (fixed) random Gaussian source used in the paper
 python scripts/gen_gaussian_params.py --save_dir data/gaussian --dim 1000
 
-# 2. Upper bound: train a beta-VAE with Z == Y (no decoder), sweeping lambda
+# 2. Upper bound: a beta-VAE with Z == Y (no decoder), one run per lambda
 for lamb in 0.3 1 3 10 30 100 300; do
-  python train/train_rdub.py --dataset gaussian --gparams_path data/gaussian/gaussian_params-dim=1000.npz \
-      --data_dim 1000 --latent_dim 1000 --prior_type gmm_1 --decoder_units 0 \
-      --lambda $lamb --checkpoint_dir checkpoints/gaussian \
+  python train/train_ub.py --model mlp_vae \
+      --dataset gaussian --gparams_path data/gaussian/gaussian_params-dim=1000.npz \
+      --prior_type gmm_1 --decoder_units 0 --lambda $lamb --checkpoint_dir checkpoints/gaussian \
       --epochs 80 --steps_per_epoch 1000 --lr 5e-4 --batchsize 64 -V
 done
-# (or drive the whole sweep from a YAML config — see "Running sweeps" below —
-#  with:  python scripts/run_sweep.py --config configs/gaussian_ub_zy.yaml)
+# (or the whole sweep:  python scripts/run_sweep.py --config configs/gaussian/mlp_vae_train_ub_zy.yaml)
 
-# 3. Lower bound: train a log-u MLP and (--eval_after) run the exhaustive-optimizer eval
-python train/train_rdlb.py --dataset gaussian --data_dim 1000 --model mlp --units 100000,100000,100000 \
-    --lamb 100 --checkpoint_dir checkpoints/gaussian \
-    --command train --batchsize 1024 --num_Ck_samples 2 --last_step 3000 \
-    --y_init quick --y_quick_topn 10 --lr 5e-4 --eval_after -V
-# (or drive the whole lambda sweep from a config:
-#  python scripts/run_sweep.py --config configs/gaussian_lb.yaml)
+# 3. Lower bound: train a log-u MLP, then estimate R_L(D) with the exhaustive optimizer
+lb="--dataset gaussian --data_dim 1000 --model mlp --units 100000,100000,100000 --lamb 100
+    --batchsize 1024 --checkpoint_dir checkpoints/gaussian"
+python train/train_lb.py $lb --num_Ck_samples 2 --last_step 3000 --y_init quick --y_quick_topn 10 --lr 5e-4 -V
+python evaluation/eval_lb.py $lb --num_Ck_samples 5
+# (or the whole lambda sweep, train + eval:  python scripts/run_sweep.py --config configs/gaussian/mlp_train_eval_lb.yaml)
 
-# to re-evaluate an existing checkpoint on its own:
-python train/train_rdlb.py --dataset gaussian --data_dim 1000 --model mlp --units 100000,100000,100000 \
-    --lamb 100 --checkpoint_dir checkpoints/gaussian \
-    --command eval --ckpt checkpoints/gaussian/<run>/step=3000-....pt --y_init exhaustive --num_Ck_samples 5
-
-# 4. Plot the sandwich figure from the trained checkpoints
+# 4. Plot the sandwich figure
 python evaluation/plot_rdub.py --checkpoint_dir checkpoints/gaussian \
     --gparams_path data/gaussian/gaussian_params-dim=1000.npz --out results/gaussian_sandwich.png
 ```
 
-See `configs/` for YAML sweep definitions and `experiments/` for the original
-shell scripts covering the Gaussian, banana, particle-physics/speech,
-GAN-image, and natural-image sweeps from the paper's README.
+Natural images (Sec. 6.4) work the same way, with an image folder as `--dataset`:
 
-## Running hyperparameter sweeps from a YAML config
+```bash
+arch="--model resnet_vae --latent_channels 4,8,16,32,64,128 --ar_prior_levels 4 --ar_slices 8 --num_filters 256"
+python train/train_ub.py $arch --lambda 0.01 --dataset /path/to/my_coco_train2017 --patchsize 256 \
+    --batchsize 8 --lr 1e-4 --epochs 600 --lr_schedule plateau --warmup 400 --patience 20 \
+    --checkpoint_dir checkpoints/img_compression --compile -V
+python evaluation/eval_ub.py $arch --lambda 0.01 --dataset data/kodak \
+    --checkpoint_dir checkpoints/img_compression --results_dir results/img_compression
+python evaluation/plot_qr.py --dataset kodak --results_dir results/img_compression --out results/qr_kodak.png
+```
 
-Instead of a GNU-`parallel` one-liner, sweeps can be declared in a YAML file and
-run with `scripts/run_sweep.py`. For example, the paper's `n=1000` Gaussian
-upper-bound sweep — originally
+See `configs/` for YAML sweep definitions and `experiments/` for shell scripts
+covering the Gaussian, banana, particle-physics/speech, and natural-image sweeps.
+
+### Natural images: ResNet-VAE vs Duan et al.'s variable-rate VAE, one recipe
+
+`variable_rate_lossy_vae` ports the model of Duan, Ma, He & Zhu, *An Improved Upper
+Bound on the Rate-Distortion Function of Images* (ICIP 2023; code:
+`lvae/models/rd` in https://github.com/duanzhiihao/lossy-vae). One model covers
+every lambda in [4, 2048] (sampled per image during training, fed to every block
+through AdaLN), so it is trained once and evaluated at many lambdas.
+
+To compare it with the ResNet-VAE without training differences, both are trained
+with the same recipe (`plan.md`):
+
+- **Loss in Duan's form** for both: `KL nats/dim + lambda * MSE on [-1, 1]`. The
+  ResNet-VAE gets it with `--image_range pm1` (`lambda_pm1 ~= 3756 x` the old
+  `[0, 255]` lambda); results are still reported as bpp and PSNR on [0, 255].
+- **Data:** raw COCO train2017 (118,287 images), 256 crops, `--hflip`,
+  `--small_image_mode reflect_pad`.
+- **Optimization:** 54 epochs at batch 32 (199,584 steps), Adam 2e-4,
+  `--lr_schedule const-cos`, `--grad_clip 2.0`, `--ema 0.9999`, fp32.
+
+```bash
+ln -s /path/to/coco/train2017 data/coco_train2017          # raw COCO train2017
+bash scripts/smoke/smoke_unified.sh                          # minutes: the whole pipeline, tiny models
+python scripts/run_sweep.py --config configs/images/resnet_vae_train_ub_pm1.yaml   # 6 lambdas
+python scripts/run_sweep.py --config configs/images/variable_rate_lossy_vae_train_ub.yaml
+python scripts/run_sweep.py --config configs/images/resnet_vae_eval_ub_pm1.yaml
+python scripts/run_sweep.py --config configs/images/variable_rate_lossy_vae_eval_ub.yaml
+python evaluation/plot_qr.py --dataset kodak --results_dir results/natural_images_unified \
+    --out results/natural_images_unified/qr_kodak.png
+```
+
+On Slurm, `scripts/slurm/train_ub_unified.sbatch` runs array task `i` as the
+`i`-th run of a config (`--export=ALL,CONFIG=configs/<source>/<name>.yaml`). Batch 32 at
+256x256 in fp32 does not fit an 11 GB GPU for either model; the 186.7M-parameter
+base model needs roughly 45 GB (an 80 GB H100).
+
+## Running sweeps: YAML configs or bash
+
+Sweeps can be declared in a YAML file and run with `scripts/run_sweep.py`. For
+example, the paper's `n=1000` Gaussian upper-bound sweep, originally
 
 ```bash
 n=1000; parallel python rdub_mlp.py ... --latent_dim {1} --lambda {2} \
     ::: 400 500 600 800 ::: 0.3 1 3 10 30 100 300
 ```
 
-is expressed by `configs/gaussian_ub.yaml`:
+is `configs/gaussian/mlp_vae_train_ub.yaml`:
 
 ```yaml
-script: train_rdub
+script: train_ub
 fixed:                        # flags identical across every run
+  model: mlp_vae
   dataset: gaussian
-  data_dim: 1000
+  gparams_path: data/gaussian/gaussian_params-dim=1000.npz
   prior_type: gmm_1
   decoder_units: 1000
   # ... (see the file for the rest)
@@ -158,56 +224,75 @@ sweep:                        # the ::: lists; the Cartesian product is run
   lambda: [0.3, 1, 3, 10, 30, 100, 300]
 ```
 
-and run with:
-
 ```bash
-python scripts/run_sweep.py --config configs/gaussian_ub.yaml   # 4 x 7 = 28 runs
-python scripts/run_sweep.py --config configs/gaussian_ub.yaml --dry-run   # preview commands
-python scripts/run_sweep.py --config configs/gaussian_ub.yaml -j 4        # 4 at a time
+python scripts/run_sweep.py --config configs/gaussian/mlp_vae_train_ub.yaml             # 4 x 7 = 28 runs
+python scripts/run_sweep.py --config configs/gaussian/mlp_vae_train_ub.yaml --dry-run   # print the commands
+python scripts/run_sweep.py --config configs/gaussian/mlp_vae_train_ub.yaml -j 4        # 4 at a time
 ```
 
-Each combination is launched as its own process (the same isolation as
-`parallel`), with `-j/--jobs` controlling concurrency. The loader
-(`rdsandwich.config`) is a small pure module: `expand_sweep` builds one params
-dict per run and `params_to_argv` renders it into the `--flag value` argv the
-`train_*.py` CLIs already accept. `run_sweep.py` drives the training CLIs
-`train_rdub`, `train_rdlb`, and `train_resnet_vae` (all flat-flag). For the
-lower bound, set `command: train` and `eval_after: true` in the config so each
-run trains and then writes its `rd-*.npz` (see `configs/gaussian_lb.yaml`).
+Each combination runs as its own process, with `-j/--jobs` controlling
+concurrency. `script` can also be a list, run in order for every combination,
+with `script_args` for flags that only one of the scripts takes. This is how the
+lower-bound configs train and then evaluate each run:
+
+```yaml
+script: [train_lb, eval_lb]
+fixed: {...}                  # passed to both (they locate the same run directory)
+script_args:
+  train_lb: {num_Ck_samples: 2, y_init: quick, last_step: 3000, lr: 5.0e-4}
+  eval_lb:  {num_Ck_samples: 5, y_init: exhaustive}
+```
+
+Configs are only a front-end to the CLIs: every YAML key is a `--flag`, so a
+bash loop (`experiments/*.sh`), a Slurm array (`scripts/slurm/`) or the output
+of `--dry-run` can drive any model the same way; `--index N` runs only the
+`N`-th combination (e.g. `--index $SLURM_ARRAY_TASK_ID`). Inside `fixed:`, every
+config is laid out in three sections: 1. data, 2. model, 3. training (or
+evaluation). Configs live in `configs/<source>/` (gaussian, physics, images) and
+are named `<model>_<train|eval>_<ub|lb>[_<variant>].yaml`; `configs/templates/<source>/`
+has one template per (model, script) listing every flag. `tests/test_configs.py`
+checks that all configs still parse, that the templates list every flag, and the
+folder / name scheme.
 
 > Note on YAML floats: write `5.0e-4`, not `5e-4` — PyYAML parses `5e-4` as a
 > string (a well-known quirk). `5.0e-4` and `0.0005` both parse as floats.
 
 ## Scaling this up
 
-The original scripts were written for one run == one process == one GPU,
-driven by GNU-`parallel`-style Cartesian-product shell one-liners. This
-port keeps that same "one hyperparameter combo per process" granularity
-(so the shell scripts in `experiments/` still work), but a few things make
-it easier to actually scale:
+The original scripts were written for one run == one process == one GPU. This
+port keeps that granularity (one hyperparameter combination per process), and:
 
-- **Each algorithm is a plain, importable PyTorch training loop**
-  (`train_rdub`, `train_rdlb`, `ResNetVAE.get_losses` + your own loop, or
-  `compression_baselines.train_baseline`) with no Keras/`tf.function`
-  tracing to fight with — drop them into a job-queue (Slurm array, Ray, or
-  `torch.multiprocessing`) exactly as you would any other PyTorch script.
-- **`RDLBTrainConfig.chunksize`** bounds peak memory in the pairwise-MSE
-  inner optimization (`optimize_y`/`batch_mse`), the main memory bottleneck
-  for the lower bound on large `k` or high-resolution images.
-- **Multi-GPU / mixed precision**: the models are ordinary `nn.Module`s, so
-  wrapping them in `torch.nn.parallel.DistributedDataParallel` or running
-  under `torch.autocast` works out of the box for `rdub.py`/`resnet_vae.py`;
-  `rdlb.py`'s inner `optimize_y` loop is inherently sequential per-batch
-  but embarrassingly parallel *across* the `M` (`num_Ck_samples`) draws —
-  see the `for _ in range(M)` loop in `train_rdlb`, which is the natural
-  place to fan out across devices/processes.
-- **Neural-compression baselines and BigGAN sampling now come from
-  actively-maintained, GPU-optimized PyTorch packages** (CompressAI,
-  `pytorch-pretrained-biggan`) instead of hand-rolled TF ports, so they
-  benefit from upstream performance work for free.
-- **jsonl logs** (`rdsandwich.utils.JsonlLogger`) are the same flat,
-  appendable format as the original repo, so existing `utils.aggregate_*`
-  style post-processing / plotting code needs only minor tweaks.
+- **Each algorithm is a plain, importable PyTorch training loop** with no
+  Keras/`tf.function` tracing, so runs drop into a job queue (Slurm array, Ray,
+  `torch.multiprocessing`) like any other PyTorch script.
+- **`--compile`, `--amp`, `--channels_last`** are trainer options, so every
+  upper-bound model gets them; `--compile` gives the image models a large speedup.
+- **`RDLBTrainConfig.chunksize` / `cand_chunk`** bound peak memory in the
+  lower bound's pairwise-MSE inner optimization, its main memory bottleneck for
+  large `k` or high-resolution images.
+- **The lower bound's inner `optimize_y`** is sequential per batch but
+  embarrassingly parallel across the `M` (`num_Ck_samples`) draws: the
+  `for _ in range(M)` loop in `LowerBoundTrainer.train` is the natural place to
+  fan out across devices.
+- **jsonl logs** (`rdsandwich.utils.io.JsonlLogger`) use the same flat, appendable
+  format as the original repo.
+
+## Mapping from the original TensorFlow repo
+
+| Original file | Ported to | Notes |
+|---|---|---|
+| `rdub_mlp.py` | `rdsandwich/models/upper_bound/mlp_vae.py`, `train/train_ub.py --model mlp_vae` | Full port: `gaussian`/`gmm_k`/`gsm_k`/`lmm_k`/`lsm_k`/`maf`/`std_gaussian` priors, optional decoder (Z==Y support), MLP encoder/decoder. The `'deep'` (DeepFactorized) prior and `posterior_type='uniform'` (used only for the NTC quantization baseline) are **not ported**. |
+| `rdlb.py` | `rdsandwich/lower_bound/`, `train/train_lb.py`, `evaluation/eval_lb.py` | Full port of `compute_Ckobj`/`batch_mse`/`optimize_y`/the Algorithm-1 outer loop/`est_R_`. `--anneal_lamb` (single-run lambda sweep) is not ported; run one `--lamb` per invocation. |
+| `ba.py` | `rdsandwich/utils/ba.py`, `scripts/run_ba.py` | Near-verbatim port — the original was already NumPy/SciPy only. |
+| `nn_models.py` | `rdsandwich/layers/` (`mlp.py`, `conv.py`), `rdsandwich/models/lower_bound/log_u.py` | `make_mlp`/`get_activation`/GDN in `mlp.py`; `get_convnet` in `conv.py`. |
+| `ntc_sources.py` | `rdsandwich/data/` | `get_banana`/`get_nd_banana` -> `BananaSource`/`NdBananaEmbedder` (in `banana.py`), reproducing the same sequence of (inverted) transforms. |
+| `gen_gaussian_params.py` | `scripts/gen_gaussian_params.py` | Direct port. |
+| `prepare_imgs.py` | `scripts/prepare_imgs.py` | Direct port (Pillow instead of `tf.image`). |
+| `resnet_vae.py` | `rdsandwich/models/upper_bound/resnet_vae.py`, `train/train_ub.py --model resnet_vae` | **Full port.** A hierarchical ResNet-VAE with GDN residual encoder/decoder blocks (Cheng et al. 2020), true **bidirectional inference** at each `LatentBlock` (bottom-up + top-down posterior, optionally parameterized relative to the prior), a **channel-wise autoregressive (IAF) prior** on the bottom `--ar_prior_levels` generative levels, and a per-channel **deep factorized** prior on the top latent `z0`. This is the `dim(Z) ≈ 0.66 dim(X)` model of Sec. 6.4. Diagram: `docs/figures/resnet_vae_ladder.png`. |
+| `ms2020.py` (β-VAE variant) | `rdsandwich/models/upper_bound/ms2020_vae.py`, `train/train_ub.py --model ms2020_vae` | **Ported architecture, β-VAE recipe.** The Minnen & Singh 2020 channel-autoregressive autoencoder (analysis/synthesis/hyper transforms per Ballé 2018 Table 1, 10 channel slices with LRP), converted to an R-D **upper-bound** β-VAE per the paper's App. A.5.7: factorized-Gaussian posteriors with learned means/variances, a deep factorized hyperprior **not** convolved with a uniform, and a Gaussian channel-conditional prior. The authors' public repo ships only the *operational* `ms2020.py` (rounding/entropy-coded, used as a baseline); the β-VAE upper-bound variant (`rdub-model=ms2020_vae`) had no released code, so this is reconstructed from the architecture + paper. Diagram: `docs/figures/ms2020_vae_diagram.png`. |
+| `mbt2018.py`, `ms2020.py` (operational baselines), `biggan.py` | — | **Not ported.** The operational Q-R baseline curves (Minnen 2018/2020, VTM, BPG, JPEG2000, …) in Fig. 3 are published numbers and are not retrained here. The GAN-image experiments (Sec. 6.3, BigGAN source) are out of scope. |
+| `boilerplate.py` | — | Keras-training-loop plumbing (LR schedules, callbacks); superseded by `rdsandwich/utils/trainer.py`'s `BaseTrainer` and the per-bound trainer subclasses. |
+| `utils.py` | `rdsandwich/utils/` (`io.py`, `torch_utils.py`) | jsonl logging (`get_json_logging_callback` -> `JsonlLogger`), `config_dict_to_str`, checkpoint helpers replacing `model.save_weights`/`load_weights`; re-exported from `rdsandwich.utils`. |
 
 ## Citing
 

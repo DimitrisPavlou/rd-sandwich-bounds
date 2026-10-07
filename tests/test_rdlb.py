@@ -2,15 +2,13 @@ import math
 
 import torch
 
-from rdsandwich.models import make_mlp
-from rdsandwich.lower_bound import (
-    LowerBoundTrainer,
-    RDLBTrainConfig,
-    compute_Ck_obj,
-    estimate_R_lower_bound,
-    optimize_y,
-)
-from rdsandwich.dataloader import GaussianSource, build_loader
+from rdsandwich.layers.mlp import make_mlp
+from rdsandwich.lower_bound.trainer import LowerBoundTrainer
+from rdsandwich.lower_bound.config import RDLBTrainConfig
+from rdsandwich.lower_bound.algorithm import compute_Ck_obj, optimize_y
+from rdsandwich.lower_bound.evaluate import estimate_R_lower_bound
+from rdsandwich.data.gaussian import GaussianSource
+from rdsandwich.data.base import build_loader
 
 
 def test_optimize_y_quick_runs():
@@ -59,3 +57,20 @@ def test_estimate_R_lower_bound_exhaustive_finite():
     cfg = RDLBTrainConfig(lamb=1.0, batchsize=16, num_Ck_samples=1, y_steps=3, y_init="exhaustive")
     res = estimate_R_lower_bound(log_u, source, lamb=1.0, cfg=cfg)
     assert math.isfinite(res["R_"])
+
+
+def test_lower_bound_trainer_on_finite_dataset():
+    """The LB loop pulls batches with _next_batch(); it must also work on finite
+    (map-style) datasets such as .npy arrays or image folders, not only on
+    infinite synthetic sources."""
+    from rdsandwich.data.array import ArraySource
+
+    torch.manual_seed(0)
+    data = ArraySource(torch.randn(64, 2).numpy())
+    model = make_mlp(2, [8, 1])
+    cfg = RDLBTrainConfig(lamb=1.0, batchsize=16, num_Ck_samples=1, last_step=6, y_steps=5)
+    trainer = LowerBoundTrainer(
+        model, build_loader(data, batch_size=cfg.batchsize),
+        optimizer=torch.optim.Adam(model.parameters(), lr=1e-3), cfg=cfg, verbose=False,
+    )
+    trainer.train()  # 7 steps x 1 batch > 4 batches per pass: wraps around the loader

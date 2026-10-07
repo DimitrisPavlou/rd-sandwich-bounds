@@ -2,10 +2,10 @@
 """Aggregate an R-D lower-bound sweep and plot the lower bound vs the true R(D).
 
 Companion to ``plot_rdub.py``. After running e.g.
-``scripts/run_sweep.py --config configs/gaussian_lb.yaml`` (the paper's
+``scripts/run_sweep.py --config configs/gaussian/mlp_train_eval_lb.yaml`` (the paper's
 varying-dimension standard-Gaussian LB study, Sec. 6.1 / Fig. 2a-bottom), each
 run folder ``rdlb-dd=<n>-...-lamb=<lambda>-...`` holds an ``rd-*.npz`` written
-by ``train_rdlb.py``'s eval. Each such file gives one number ``R_`` = the
+by ``evaluation/eval_lb.py``. Each such file gives one number ``R_`` = the
 estimated intercept xi(lambda) of a tangent line to the true R(D) curve, at
 slope ``-lambda`` (Eq. 15).
 
@@ -40,14 +40,12 @@ import glob
 import json
 import math
 import os
-import sys
 from collections import defaultdict
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rdsandwich.dataloader import gaussian_analytical_rd
+from rdsandwich.data.gaussian import gaussian_analytical_rd
 
 
 def _parse_token(name: str, key: str):

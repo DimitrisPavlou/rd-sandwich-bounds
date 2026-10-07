@@ -1,9 +1,14 @@
 import numpy as np
+import pytest
 import torch
+from PIL import Image
 
-from rdsandwich.dataloader import (
-    BananaSource, GaussianSource, NdBananaEmbedder, gaussian_analytical_rd, gen_gaussian_params,
-)
+from rdsandwich.data.array import ArraySource
+from rdsandwich.data.banana import BananaSource, NdBananaEmbedder
+from rdsandwich.data.gaussian import GaussianSource, gaussian_analytical_rd, gen_gaussian_params
+from rdsandwich.data.image import ImageFolderDataset
+from rdsandwich.data.base import build_loader
+from rdsandwich.data.datasets import dataset_name, get_dataset
 
 
 def test_gaussian_source_shape():
@@ -37,3 +42,46 @@ def test_gaussian_analytical_rd_monotonic():
     d_lo = gaussian_analytical_rd(scale, D=0.1)
     d_hi = gaussian_analytical_rd(scale, D=1.0)
     assert d_lo >= d_hi >= 0
+
+
+# --------------------------------------------------------------------------- #
+# get_dataset: synthetic names or a path (relative or absolute)
+# --------------------------------------------------------------------------- #
+def test_get_dataset_synthetic():
+    assert get_dataset("gaussian", data_dim=3).sample(5).shape == (5, 3)
+    assert isinstance(get_dataset("banana", data_dim=2), BananaSource)
+    assert get_dataset("banana", data_dim=6).sample(4).shape == (4, 6)
+    with pytest.raises(ValueError):
+        get_dataset("gaussian")
+
+
+def test_get_dataset_array_path(tmp_path):
+    path = tmp_path / "x.npy"
+    np.save(path, np.random.randn(20, 7).astype(np.float32))
+    ds = get_dataset(str(path))
+    assert isinstance(ds, ArraySource) and len(ds) == 20 and ds[0].shape == (7,)
+    with pytest.raises(FileNotFoundError):
+        get_dataset(str(tmp_path / "missing.npy"))
+
+
+def test_get_dataset_image_folder_any_path(tmp_path):
+    folder = tmp_path / "somewhere" / "my_images"
+    folder.mkdir(parents=True)
+    for i in range(3):
+        Image.fromarray((np.random.rand(40, 50, 3) * 255).astype(np.uint8)).save(folder / f"{i}.png")
+    ds = get_dataset(str(folder), patchsize=16)
+    assert isinstance(ds, ImageFolderDataset) and len(ds) == 3
+    assert next(iter(build_loader(ds, batch_size=2))).shape == (2, 3, 16, 16)
+    assert ds.sample(4).shape == (4, 3, 16, 16)
+    assert next(get_dataset(str(folder)).all_images()).shape == (1, 3, 40, 50)
+
+
+def test_get_dataset_unknown_spec(tmp_path):
+    with pytest.raises(ValueError):
+        get_dataset(str(tmp_path / "does_not_exist"))
+
+
+def test_dataset_name():
+    assert dataset_name("data/kodak/") == "kodak"
+    assert dataset_name("/mnt/hdd/Tecnick_TESTIMAGES/RGB/RGB_OR_1200x1200") == "tecnick"
+    assert dataset_name("data/physics/ppzee-split=test.npy") == "ppzee-split=test"

@@ -15,10 +15,10 @@ dependencies = [
     "Pillow>=9.0",
     "torchvision>=0.15",
     "PyYAML>=6.0",
+    "tqdm>=4.0",
 ]
 
 [project.optional-dependencies]
-images = ["compressai>=1.2", "pytorch-pretrained-biggan>=0.1.1"]
 dev = ["pytest>=7.0", "matplotlib>=3.5"]
 
 [tool.setuptools.packages.find]

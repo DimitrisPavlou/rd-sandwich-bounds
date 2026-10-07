@@ -1,0 +1,82 @@
+# =============================================================================
+# TEMPLATE: R-D UPPER BOUND, training  ->  train/train_ub.py   (model: mlp_vae)
+# =============================================================================
+# MLP beta-VAE for vector data (Yang & Mandt, Sec. 6.1-6.2): synthetic Gaussian /
+# banana sources or .npy/.npz arrays (physics, speech, ...); one model per lambda.
+# Experiments: gaussian/mlp_vae_train_ub*.yaml (physics: templates/physics/).
+#
+# Lists EVERY flag train/train_ub.py accepts for this model, as (type, default) plus
+# a one-line description, in three sections: 1. data, 2. model, 3. training.
+# Commented-out lines are flags left at their default. The active values are
+# configs/gaussian/mlp_vae_train_ub.yaml (one latent_dim).
+#
+# Run:   python scripts/run_sweep.py --config configs/templates/gaussian/mlp_vae_train_ub.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Conventions: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b ;
+#              write 5.0e-4, NOT 5e-4 (YAML would parse it as a string).
+# =============================================================================
+
+script: train_ub
+
+fixed:
+  # ===== 1. data =============================================================
+  dataset: gaussian             # (str, REQUIRED)  "gaussian" | "banana" | a .npy/.npz file (rows are samples),
+                                #   used as given (relative, or absolute anywhere on disk).
+  data_dim: 1000                # (int, null)  required for "gaussian" (without gparams_path) and "banana";
+                                #   inferred from the file for .npy/.npz data.
+  gparams_path: data/gaussian/gaussian_params-dim=1000.npz   # (str, null)  "gaussian" only: .npz with the
+                                #   source's loc/scale (scripts/gen_gaussian_params.py); null = N(0, I).
+  # num_workers: 0              # (int, 0)  DataLoader worker processes (finite .npy/.npz data only).
+  # patchsize: null             # (int, null)  [images only] unused for vector data.
+  # max_images: null            # (int, null)  [images only] unused for vector data.
+  # preload: false              # (bool, false)  [images only] unused for vector data.
+  # hflip: false                # (bool, false)  [images only] unused for vector data.
+  # small_image_mode: resize    # (str, resize)  [images only] unused for vector data.
+
+  # ===== 2. model ============================================================
+  model: mlp_vae                # (str, REQUIRED)  mlp_vae | resnet_vae | ms2020_vae | variable_rate_lossy_vae.
+  lambda: 10                    # (float, 0.01)  R-D trade-off: loss = rate + lambda * MSE. SWEPT below.
+  latent_dim: 400               # (int, null)  latent dimension; required unless decoder_units is [0] (Z == Y).
+  encoder_units: []             # (list[int], [])  encoder hidden widths ([] = a single linear layer).
+  decoder_units: [1000]         # (list[int], [])  decoder hidden widths; [0] = no decoder (Z == Y).
+  encoder_activation: none      # (str, softplus)  encoder hidden activation (none = linear).
+  decoder_activation: leaky_relu   # (str, softplus)  decoder hidden activation.
+  prior_type: gmm_1             # (str, std_gaussian)  std_gaussian | maf | gmm_<k> | gsm_<k> | lmm_<k> | lsm_<k>.
+  posterior_type: gaussian      # (str, gaussian)  variational posterior family.
+  # ar_hidden_units: [10, 10]   # (list[int], [10,10])  [prior_type: maf] MADE widths in each MAF stack.
+  # maf_stacks: 0               # (int, 0)  [prior_type: maf] number of MAF flow stacks.
+  rpd: true                     # (bool, false)  report the rate per data dimension.
+  # nats: false                 # (bool, false)  report the rate in nats (else bits).
+
+  # ===== 3. training =========================================================
+  batchsize: 64                 # (int, 64)  samples per optimizer step.
+  epochs: 80                    # (int, 100)  synthetic sources: blocks of steps_per_epoch steps;
+                                #   .npy/.npz data: full passes (floor(num_samples / batchsize) steps each).
+  steps_per_epoch: 1000         # (int, 1000)  synthetic sources only.
+  lr: 5.0e-4                    # (float, 1.0e-3)  Adam learning rate.
+  lr_schedule: piecewise        # (str, piecewise)  piecewise (x0.2 at 50/75/87.5% of the epochs) |
+                                #   plateau (halve after `patience` flat epochs, once past `warmup`) |
+                                #   constant | const-cos (constant for half the epochs, then a cosine
+                                #   down to 0.01x).
+  # warmup: 400                 # (int, 400)  [plateau only] epochs before the LR may be reduced.
+  # patience: 20                # (int, 20)  [plateau only] epochs without improvement before halving.
+  # grad_clip: null             # (float, null)  clip the global gradient 2-norm (in loss units); null = off.
+  # ema: null                   # (float, null)  keep an exponential moving average of the weights with this
+                                #   decay; saved in the checkpoint and evaluated by default. null = off.
+  # ema_warmup: 10000           # (int, 10000)  EMA warmup in steps: decay * (1 - exp(-step / ema_warmup)).
+  skip_nonfinite: 0             # (int, 0)  skip up to N consecutive non-finite-gradient steps; 0 = abort.
+  amp: false                    # (bool, false)  fp16 mixed precision (autocast + gradient scaler).
+  compile: false                # (bool, false)  torch.compile the loss (the first steps compile).
+  channels_last: false          # (bool, false)  channels_last memory format (image models).
+  # --- run / bookkeeping ---
+  checkpoint_dir: checkpoints/templates   # (str, ./checkpoints)  writes <checkpoint_dir>/<run name>/.
+  # checkpoint_interval: null   # (int, null)  also save every N epochs (what --resume restarts from);
+                                #   null = only at the end.
+  resume: false                 # (bool, false)  continue from the newest checkpoint in the run directory.
+  seed: 0                       # (int, 0)  random seed.
+  # device: cuda                # (str, null)  e.g. cuda, cuda:1, cpu; null = cuda if available.
+  verbose: true                 # (bool, false)  print per-epoch metrics.
+
+sweep:
+  lambda: [0.3, 1, 3, 10, 30, 100, 300]   # model section: one run per lambda

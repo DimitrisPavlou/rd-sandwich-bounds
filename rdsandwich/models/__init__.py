@@ -1,18 +1,9 @@
-"""Generic neural-network building blocks shared across the bound algorithms.
+"""Trainable models, grouped by the bound they estimate.
 
-This subpackage holds only reusable *network* classes (MLPs, conv nets, GDN,
-normalizing flows). The bound-specific models that also compute an objective
-(e.g. the beta-VAE ``RDUBModel``) live in ``rdsandwich.upper_bound`` /
-``rdsandwich.lower_bound`` instead.
+  * ``rdsandwich.models.upper_bound`` -- beta-VAEs whose ``get_losses(x)``
+    returns ``(loss, rate, distortion)``; any such model can be trained by
+    ``rdsandwich.upper_bound.trainer.UpperBoundTrainer``.
+  * ``rdsandwich.models.lower_bound`` -- ``log u`` networks for the lower bound.
+
+The generic building blocks these are made of live in ``rdsandwich.layers``.
 """
-from .gdn import GDN, NonNegativeParameterizer
-from .mlp import get_activation, make_mlp
-from .conv import get_convnet
-from .flows import MADE, MAF, MAFLayer
-from .deep_factorized import DeepFactorized
-from .channelwise_ar import ChannelwiseARTransform
-
-__all__ = [
-    "GDN", "NonNegativeParameterizer", "get_activation", "make_mlp", "get_convnet",
-    "MADE", "MAF", "MAFLayer", "DeepFactorized", "ChannelwiseARTransform",
-]

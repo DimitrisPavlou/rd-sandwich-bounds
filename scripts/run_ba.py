@@ -9,14 +9,12 @@ Example:
 import argparse
 import json
 import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rdsandwich.utils.ba import discretize_and_run_ba
-from rdsandwich.utils import MyJSONEncoder, config_dict_to_str
+from rdsandwich.utils.io import MyJSONEncoder, config_dict_to_str
 
 
 def main():

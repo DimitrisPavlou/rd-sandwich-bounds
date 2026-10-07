@@ -1,0 +1,62 @@
+# =============================================================================
+# TEMPLATE: R-D UPPER BOUND, evaluation  ->  evaluation/eval_ub.py   (model: mlp_vae)
+# =============================================================================
+# Evaluates trained MLP beta-VAE checkpoints on vector data: (D, R) mean, std and
+# 95% CI over fresh batches (paper App. A.6), written to
+# <results_dir>/<run name>-dataset=<name>.npz.
+#
+# Lists EVERY flag evaluation/eval_ub.py accepts for this model, as (type, default)
+# plus a one-line description, in three sections: 1. data, 2. model, 3. evaluation.
+# The model flags (with lambda and checkpoint_dir) must match the training run:
+# they determine the run directory whose newest checkpoint is loaded.
+#
+# Run:   python scripts/run_sweep.py --config configs/templates/gaussian/mlp_vae_eval_ub.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Conventions: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b.
+# =============================================================================
+
+script: eval_ub
+
+fixed:
+  # ===== 1. data =============================================================
+  dataset: gaussian             # (str, REQUIRED)  "gaussian" | "banana" | a .npy/.npz file (e.g. a test split).
+  data_dim: 1000                # (int, null)  required for "gaussian" (without gparams_path) and "banana".
+  gparams_path: data/gaussian/gaussian_params-dim=1000.npz   # (str, null)  "gaussian" only: source loc/scale.
+  # num_workers: 0              # (int, 0)  DataLoader worker processes.
+  # patchsize: null             # (int, null)  [images only] unused for vector data.
+  # max_images: null            # (int, null)  [images only] unused for vector data.
+  # preload: false              # (bool, false)  [images only] unused for vector data.
+  # hflip: false                # (bool, false)  [images only] unused for vector data.
+  # small_image_mode: resize    # (str, resize)  [images only] unused for vector data.
+
+  # ===== 2. model (must match the training run) ==============================
+  model: mlp_vae                # (str, REQUIRED)  mlp_vae | resnet_vae | ms2020_vae | variable_rate_lossy_vae.
+  # lambda: SWEPT below         # (float, 0.01)  the training run's lambda (selects its checkpoint).
+  latent_dim: 400               # (int, null)  latent dimension; required unless decoder_units is [0].
+  encoder_units: []             # (list[int], [])  encoder hidden widths.
+  decoder_units: [1000]         # (list[int], [])  decoder hidden widths; [0] = no decoder (Z == Y).
+  encoder_activation: none      # (str, softplus)  encoder hidden activation.
+  decoder_activation: leaky_relu   # (str, softplus)  decoder hidden activation.
+  prior_type: gmm_1             # (str, std_gaussian)  std_gaussian | maf | gmm_<k> | gsm_<k> | lmm_<k> | lsm_<k>.
+  posterior_type: gaussian      # (str, gaussian)  variational posterior family.
+  # ar_hidden_units: [10, 10]   # (list[int], [10,10])  [prior_type: maf] MADE widths in each MAF stack.
+  # maf_stacks: 0               # (int, 0)  [prior_type: maf] number of MAF flow stacks.
+  rpd: true                     # (bool, false)  report the rate per data dimension.
+  # nats: false                 # (bool, false)  report the rate in nats (else bits).
+
+  # ===== 3. evaluation =======================================================
+  checkpoint_dir: checkpoints/templates   # (str, ./checkpoints)  where the training run wrote its run directory.
+  # ckpt: path/to/ckpt.pt       # (str, null)  evaluate this checkpoint file instead of the newest one.
+  no_ema: false                 # (bool, false)  use the raw weights even if the checkpoint has EMA weights.
+  results_dir: results/templates   # (str, results)  where the result .npz files are written.
+  mode: auto                    # (str, auto)  sampled ((D, R) mean +/- 95% CI over random batches) |
+                                #   full_image (images only) | auto (sampled for vector data).
+  batchsize: 1024               # (int, 1024)  [mode: sampled] batch size.
+  num_batches: 100              # (int, 100)  [mode: sampled] number of batches.
+  seed: 0                       # (int, 0)  random seed.
+  # device: cuda                # (str, null)  e.g. cuda, cuda:1, cpu; null = cuda if available.
+  verbose: true                 # (bool, false)  print progress.
+
+sweep:
+  lambda: [0.3, 1, 3, 10, 30, 100, 300]   # model section: one checkpoint per lambda

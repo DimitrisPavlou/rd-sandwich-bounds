@@ -133,20 +133,35 @@ def save_checkpoint(path: str, model: torch.nn.Module, optimizer=None, extra: Op
     return path
 
 
-def load_checkpoint(path: str, model: torch.nn.Module, optimizer=None, map_location=None) -> dict:
+def load_checkpoint(path: str, model: torch.nn.Module, optimizer=None, map_location=None,
+                    use_ema: bool = False) -> dict:
+    """Load weights (and optimizer state) from ``path``; returns the ``extra`` payload.
+
+    ``use_ema=True`` loads the exponential-moving-average weights instead of the raw
+    ones when the checkpoint has them (``extra["ema_state_dict"]``), as for evaluation.
+    """
     state = torch.load(path, map_location=map_location)
-    model.load_state_dict(state["model_state_dict"])
+    extra = state.get("extra", {})
+    if use_ema and "ema_state_dict" in extra:
+        model.load_state_dict(extra["ema_state_dict"])
+    else:
+        model.load_state_dict(state["model_state_dict"])
     if optimizer is not None and "optimizer_state_dict" in state:
         optimizer.load_state_dict(state["optimizer_state_dict"])
-    return state.get("extra", {})
+    return extra
 
 
 def latest_checkpoint(dir_path: str, suffix: str = ".pt") -> Optional[str]:
-    """Return the most-recently-modified checkpoint file in ``dir_path``, or None."""
+    """Return the most-recently-modified checkpoint file in ``dir_path``, or None.
+
+    ``explosion-*`` dumps written by ``BaseTrainer`` on a non-finite loss are not
+    checkpoints (no optimizer state, pre-explosion weights) and are skipped.
+    """
     if not os.path.isdir(dir_path):
         return None
     candidates = [
-        os.path.join(dir_path, f) for f in os.listdir(dir_path) if f.endswith(suffix)
+        os.path.join(dir_path, f) for f in os.listdir(dir_path)
+        if f.endswith(suffix) and not f.startswith("explosion-")
     ]
     if not candidates:
         return None

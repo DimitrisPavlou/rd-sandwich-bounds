@@ -1,7 +1,7 @@
 """Tests for the channel-wise autoregressive transform."""
 import torch
 
-from rdsandwich.models import ChannelwiseARTransform
+from rdsandwich.layers.channelwise_ar import ChannelwiseARTransform
 
 
 def test_shape_preserved_and_first_slice_zero():

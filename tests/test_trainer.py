@@ -5,8 +5,9 @@ import pytest
 import torch
 import torch.nn as nn
 
-from rdsandwich.dataloader import build_loader
-from rdsandwich.utils import BaseTrainer, WarmupReduceLROnPlateau
+from rdsandwich.data.base import build_loader
+from rdsandwich.utils.lr_schedulers import WarmupReduceLROnPlateau
+from rdsandwich.utils.trainer import BaseTrainer
 
 
 class _Src:
@@ -134,3 +135,14 @@ def test_grad_norm_logging_and_clip_frac():
     tr2 = _Trainer(m, loader, optimizer=opt, epochs=1, steps_per_epoch=3,
                    grad_clip=1e12, verbose=False)
     assert tr2.train()["clip_frac"] == [0.0]
+
+
+def test_latest_checkpoint_skips_explosion_dumps(tmp_path):
+    import time
+
+    from rdsandwich.utils.io import latest_checkpoint
+
+    (tmp_path / "ckpt-lambda=0.01.pt").write_bytes(b"x")
+    time.sleep(0.01)
+    (tmp_path / "explosion-e3-s7-2026.pt").write_bytes(b"x")  # newer, but not a checkpoint
+    assert latest_checkpoint(str(tmp_path)).endswith("ckpt-lambda=0.01.pt")

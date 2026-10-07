@@ -1,21 +1,25 @@
 #!/usr/bin/env python
-"""Run a sweep of training runs declared in a YAML config.
+"""Run a sweep of training / evaluation runs declared in a YAML config.
 
-This replaces the GNU-``parallel`` one-liners in the README / ``experiments``.
-For example, the n=1000 Gaussian upper-bound sweep::
+This replaces GNU-``parallel`` one-liners. For example, the n=1000 Gaussian
+upper-bound sweep::
 
     n=1000; parallel python rdub_mlp.py ... --latent_dim {1} --lambda {2} \\
         ::: 400 500 600 800 ::: 0.3 1 3 10 30 100 300
 
 becomes::
 
-    python scripts/run_sweep.py --config configs/gaussian_ub.yaml
+    python scripts/run_sweep.py --config configs/gaussian/mlp_vae_train_ub.yaml
 
-Each (latent_dim, lambda) combination is expanded from the config's ``sweep``
-block (see ``rdsandwich.config``) and launched as its own process — the same
-"one hyperparameter combo per process" isolation as ``parallel``. Use
-``--jobs N`` to run up to N of them concurrently, and ``--dry-run`` to print
-the commands without running anything.
+Each combination is expanded from the config's ``sweep`` block (see
+``rdsandwich.sweep``) and launched as its own process, the same "one
+hyperparameter combo per process" isolation as ``parallel``. When ``script`` is
+a list (e.g. ``[train_lb, eval_lb]``), its scripts run in order for each
+combination, stopping at the first failure. Use ``--jobs N`` to run up to N
+combinations concurrently, and ``--dry-run`` to print the commands instead (they
+can be pasted into a bash script or a Slurm array). ``--index N`` runs only the
+N-th combination (0-based, in ``--dry-run`` order), so a Slurm array task can run
+``--index $SLURM_ARRAY_TASK_ID`` straight from the YAML.
 """
 import argparse
 import os
@@ -23,29 +27,39 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from rdsandwich.sweep import expand_sweep, get_scripts, load_config, params_to_argv, script_params
 
-from rdsandwich.config import expand_sweep, load_config, params_to_argv
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPTS_DIR)
-TRAIN_DIR = os.path.join(REPO_ROOT, "train")
-# CLIs whose arguments are all top-level flags (no argparse sub-commands), so a
-# flat params dict maps cleanly onto argv.
-ALLOWED_SCRIPTS = {"train_rdub", "train_rdlb", "train_resnet_vae", "train_image_ub"}
+SCRIPTS = {
+    "train_ub": os.path.join(REPO_ROOT, "train", "train_ub.py"),
+    "train_lb": os.path.join(REPO_ROOT, "train", "train_lb.py"),
+    "eval_ub": os.path.join(REPO_ROOT, "evaluation", "eval_ub.py"),
+    "eval_lb": os.path.join(REPO_ROOT, "evaluation", "eval_lb.py"),
+}
 
 
 def build_commands(config, config_path):
-    script = config.get("script")
-    if script not in ALLOWED_SCRIPTS:
-        raise SystemExit(
-            f"config 'script' must be one of {sorted(ALLOWED_SCRIPTS)}, got {script!r} "
-            f"(in {config_path})"
-        )
-    script_path = os.path.join(TRAIN_DIR, f"{script}.py")
-    if not os.path.exists(script_path):
-        raise SystemExit(f"script not found: {script_path}")
-    return [[sys.executable, script_path, *params_to_argv(run)] for run in expand_sweep(config)]
+    """One list of commands per run (several when ``script`` is a list)."""
+    scripts = get_scripts(config)
+    for script in scripts:
+        if script not in SCRIPTS:
+            raise SystemExit(f"config 'script' entries must be in {sorted(SCRIPTS)}, got {script!r} "
+                             f"(in {config_path})")
+    return [
+        [[sys.executable, SCRIPTS[s], *params_to_argv(script_params(config, s, run))] for s in scripts]
+        for run in expand_sweep(config)
+    ]
+
+
+def select_runs(runs, index):
+    """All runs, or only the ``index``-th one (0-based) when ``index`` is given."""
+    if index is None:
+        return runs
+    if not 0 <= index < len(runs):
+        raise SystemExit(f"--index {index} is out of range: the config expands to {len(runs)} run(s) "
+                         f"(valid: 0..{len(runs) - 1})")
+    return [runs[index]]
 
 
 def main():
@@ -53,26 +67,35 @@ def main():
     p.add_argument("--config", required=True, help="Path to a YAML experiment config.")
     p.add_argument("--jobs", "-j", type=int, default=1, help="Number of runs to execute concurrently.")
     p.add_argument("--dry-run", action="store_true", help="Print the commands instead of running them.")
+    p.add_argument("--index", type=int, default=None,
+                   help="Run only the N-th expanded run (0-based), e.g. a Slurm array task id.")
     args = p.parse_args()
 
     config = load_config(args.config)
-    commands = build_commands(config, args.config)
-    print(f"{len(commands)} run(s) expanded from {args.config} (script={config['script']})")
+    runs = build_commands(config, args.config)
+    print(f"{len(runs)} run(s) expanded from {args.config} (script={config['script']})")
+    runs = select_runs(runs, args.index)
+    if args.index is not None:
+        print(f"--index {args.index}: running only that one")
 
     if args.dry_run:
-        for cmd in commands:
-            print("  " + subprocess.list2cmdline(cmd))
+        for cmds in runs:
+            print("  " + " && ".join(subprocess.list2cmdline(c) for c in cmds))
         return
 
-    def run_one(cmd):
-        print("START " + subprocess.list2cmdline(cmd))
-        return subprocess.run(cmd).returncode
+    def run_one(cmds):
+        for cmd in cmds:
+            print("START " + subprocess.list2cmdline(cmd))
+            rc = subprocess.run(cmd).returncode
+            if rc != 0:
+                return rc, cmd
+        return 0, None
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        returncodes = list(pool.map(run_one, commands))
+        results = list(pool.map(run_one, runs))
 
-    failures = [(rc, cmd) for rc, cmd in zip(returncodes, commands) if rc != 0]
-    print(f"\nDone: {len(commands) - len(failures)}/{len(commands)} runs succeeded.")
+    failures = [(rc, cmd) for rc, cmd in results if rc != 0]
+    print(f"\nDone: {len(runs) - len(failures)}/{len(runs)} runs succeeded.")
     if failures:
         for rc, cmd in failures:
             print(f"  FAILED (exit {rc}): {subprocess.list2cmdline(cmd)}")

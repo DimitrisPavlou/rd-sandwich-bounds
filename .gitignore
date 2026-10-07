@@ -13,9 +13,12 @@ data/*.jpg
 !data/.gitkeep
 .venv/
 *.pt
-data/
-configs/*.yaml
-!configs/templates/
+/data/
+# experiment configs stay local (the already-tracked gaussian/ and physics/ ones stay tracked);
+# templates are versioned
+configs/*/*.yaml
+!configs/templates/**
 papers/
 results/
 .DS_Store
+.idea/

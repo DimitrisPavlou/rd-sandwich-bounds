@@ -1,0 +1,64 @@
+# R-D LOWER BOUND sweep on the n=16 particle-physics source (paper Sec. 6.2 / Fig. 2b),
+# the ppzee data from Howard et al. (2021). Trains a log-u MLP per lambda, then evaluates it
+# with the exhaustive global optimizer to write the reported rd-*.npz.
+# Mirrors the AUTHORS' command:
+#
+#   parallel python rdlb.py -V --dataset data/physics/ppzee-split=train.npy --data_dim 16 \
+#     --checkpoint_dir checkpoints/physics --model mlp --units 200,200,200 --lamb {} train \
+#     --batchsize 2048 --num_Ck_samples 2 --last_step 4000 --checkpoint_interval 2000 \
+#     --y_init quick --y_quick_topn 3 --lr 5e-4 --lr_schedule ::: 100 300 1000 3000 10000 30000
+#
+# Same large lambda range as the UB (physics/mlp_vae_train_ub.yaml): the raw ppzee features have tiny
+# per-dimension variance (~0.0025), so the informative R-D regime only appears at large lambda.
+# Uses checkpoint_dir=checkpoints/physics so these rd-*.npz sit next to the UB runs and
+# plot_rdub.py draws a full sandwich (pass --per_sample for the physics rate axis).
+#
+# Not ported (no counterpart here):
+#   --lr_schedule : this port's lower-bound trainer uses a fixed Adam lr, no scheduler.
+#
+# Each run is trained (train_lb) and then evaluated (eval_lb, exhaustive optimizer over
+# all k=2048 batch points), which writes rd-*.npz -- the number the plot consumes. The
+# authors ran that eval as a separate step too. The eval is the slow part of each run.
+#
+# Run it with:  python scripts/run_sweep.py --config configs/physics/mlp_train_eval_lb.yaml
+# (add --dry-run to preview the 6 commands, or -j N to run N at a time)
+
+script: [train_lb, eval_lb]
+
+# Flags passed to both train_lb and eval_lb (they locate the same run directory).
+fixed:
+  # ===== 1. data =============================================================
+  dataset: data/physics/ppzee-split=train.npy   # .npy path -> ArraySource
+  data_dim: 16
+
+  # ===== 2. model ============================================================
+  model: mlp
+  units: [200, 200, 200]       # log-u network hidden widths (authors: 200,200,200)
+
+  # ===== 3. training and evaluation ==========================================
+  checkpoint_dir: checkpoints/physics
+  batchsize: 2048              # k
+  y_quick_topn: 3
+  y_sequential: false          # false = vectorized inner optimizer (fast; the default), same as
+                               #   configs/gaussian/mlp_train_eval_lb.yaml. Set true only to fall back to the
+                               #   per-candidate sequential loop. This is what makes the exhaustive
+                               #   eval (all k=2048 candidates) tractable instead of 2048 serial runs.
+  # cand_chunk: 512            # vectorized only: chunk the P candidates to cap the [P, k, n] term's
+                               #   peak memory if the exhaustive eval (P=k=2048) runs out of RAM.
+  verbose: true
+
+# Flags for one script only.
+script_args:
+  train_lb:
+    num_Ck_samples: 2          # M
+    y_init: quick              # fast inner optimizer during training
+    last_step: 4000
+    checkpoint_interval: 2000
+    lr: 5.0e-4                 # note: write 5.0e-4, not 5e-4 (YAML parses 5e-4 as a string)
+  eval_lb:
+    num_Ck_samples: 5
+    y_init: exhaustive
+
+# Flags to vary. run_sweep.py runs the Cartesian product: 6 lambda values = 6 runs.
+sweep:
+  lamb: [100, 300, 1000, 3000, 10000, 30000]

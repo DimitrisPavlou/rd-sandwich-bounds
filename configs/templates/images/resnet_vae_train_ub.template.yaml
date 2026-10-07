@@ -1,0 +1,84 @@
+# =============================================================================
+# TEMPLATE: R-D UPPER BOUND, training  ->  train/train_ub.py   (model: resnet_vae)
+# =============================================================================
+# Hierarchical ResNet-VAE of Yang & Mandt (ICLR 2022, Sec. 6.4); one model per lambda.
+# Experiments: images/resnet_vae_train_ub*.yaml, images/smoke_train_ub.yaml.
+#
+# Lists EVERY flag train/train_ub.py accepts for this model, as (type, default) plus
+# a one-line description, in three sections: 1. data, 2. model, 3. training.
+# Commented-out lines are flags left at their default. The active values are the
+# shared recipe used to compare against Duan et al.'s model
+# (configs/images/resnet_vae_train_ub_pm1.yaml).
+#
+# Run:   python scripts/run_sweep.py --config configs/templates/images/resnet_vae_train_ub.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Conventions: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b ;
+#              write 2.0e-4, NOT 2e-4 (YAML would parse it as a string) ;
+#              quote "0_255" (unquoted, YAML reads it as an octal number).
+# =============================================================================
+
+script: train_ub
+
+fixed:
+  # ===== 1. data =============================================================
+  dataset: data/coco_train2017  # (str, REQUIRED)  training images: a directory or glob of images, used
+                                #   as given (relative, or absolute anywhere on disk, e.g. /mnt/hdd/coco).
+  patchsize: 256                # (int, null)  random square crop size; null = whole images.
+  hflip: true                   # (bool, false)  mirror each training patch left-right with probability 0.5.
+  small_image_mode: reflect_pad # (str, resize)  images smaller than patchsize: resize (stretch them up) |
+                                #   reflect_pad (mirror-pad both ends by the shortfall, as Duan et al.).
+  # max_images: 64              # (int, null)  use only the first N images (smoke tests).
+  preload: false                # (bool, false)  decode every image into RAM once (~sum(3*H*W) bytes) and
+                                #   force num_workers=0; for small sets only (full COCO is ~100 GB).
+  num_workers: 16               # (int, 0)  DataLoader worker processes that decode images.
+  # data_dim: null              # (int, null)  vector data only; unused for images.
+  # gparams_path: null          # (str, null)  "gaussian" source only; unused for images.
+
+  # ===== 2. model ============================================================
+  model: resnet_vae             # (str, REQUIRED)  mlp_vae | resnet_vae | ms2020_vae | variable_rate_lossy_vae.
+  lambda: 64                    # (float, 0.01)  R-D trade-off in loss = rate + lambda * distortion; its
+                                #   units follow image_range (pm1 lambda ~= 3756 x 0_255 lambda). SWEPT below.
+  image_range: pm1              # (str, 0_255)  "0_255": loss = bpp + lambda * MSE on [0, 255] (Yang & Mandt) |
+                                #   pm1: loss = KL nats/dim + lambda * MSE on [-1, 1] (Duan et al.).
+                                #   Reports (bpp, PSNR on [0, 255]) are the same either way.
+  num_filters: 256              # (int, 256)  channels of every encoder / decoder convolution.
+  latent_channels: [4, 8, 16, 32, 64, 128]  # (list[int], [4,8,16,32,64,128])  latent channels per level,
+                                #   finest to coarsest; the length is the number of levels (each halves
+                                #   the resolution, so image sides must be multiples of 2^levels).
+  ar_prior_levels: 4            # (int, 4)  finest levels that use the channel-wise autoregressive prior.
+  ar_slices: 8                  # (int, 8)  channel slices in that autoregressive prior.
+  scale_min: 1.0e-5             # (float, 1.0e-5)  floor on every Gaussian latent scale (numerical stability).
+
+  # ===== 3. training =========================================================
+  batchsize: 32                 # (int, 64)  patches per optimizer step.
+  epochs: 54                    # (int, 100)  passes over the training images; each epoch is
+                                #   floor(num_images / batchsize) steps (COCO, batch 32: 3,696 steps,
+                                #   so 54 epochs = 199,584 steps).
+  # steps_per_epoch: 1000       # (int, 1000)  synthetic sources only (they have no fixed size).
+  lr: 2.0e-4                    # (float, 1.0e-3)  Adam learning rate.
+  lr_schedule: const-cos        # (str, piecewise)  piecewise (x0.2 at 50/75/87.5% of the epochs) |
+                                #   plateau (halve after `patience` flat epochs, once past `warmup`) |
+                                #   constant | const-cos (constant for half the epochs, then a cosine
+                                #   down to 0.01x; Duan et al.).
+  # warmup: 400                 # (int, 400)  [plateau only] epochs before the LR may be reduced.
+  # patience: 20                # (int, 20)  [plateau only] epochs without improvement before halving.
+  grad_clip: 2.0                # (float, null)  clip the global gradient 2-norm (in loss units); null = off.
+  ema: 0.9999                   # (float, null)  keep an exponential moving average of the weights with this
+                                #   decay; saved in the checkpoint and evaluated by default. null = off.
+  ema_warmup: 10000             # (int, 10000)  EMA warmup in steps: decay * (1 - exp(-step / ema_warmup)).
+  skip_nonfinite: 0             # (int, 0)  skip up to N consecutive non-finite-gradient steps; 0 = abort.
+  amp: false                    # (bool, false)  fp16 mixed precision (autocast + gradient scaler).
+  compile: true                 # (bool, false)  torch.compile the loss (the first steps compile).
+  channels_last: false          # (bool, false)  channels_last memory format.
+  # --- run / bookkeeping ---
+  checkpoint_dir: checkpoints/templates   # (str, ./checkpoints)  writes <checkpoint_dir>/<run name>/.
+  checkpoint_interval: 1        # (int, null)  also save every N epochs (what --resume restarts from);
+                                #   null = only at the end.
+  resume: true                  # (bool, false)  continue from the newest checkpoint in the run directory.
+  seed: 0                       # (int, 0)  random seed.
+  # device: cuda                # (str, null)  e.g. cuda, cuda:1, cpu; null = cuda if available.
+  verbose: true                 # (bool, false)  print per-epoch metrics.
+
+sweep:
+  lambda: [8, 22.6, 64, 181, 512, 1448]   # model section: one run per lambda (pm1 units)

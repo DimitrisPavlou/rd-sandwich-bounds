@@ -5,8 +5,10 @@
 #   - data/physics/ppzee-split={train,test}.npy   (from Howard et al., 2021)
 #   - data/speech/*.npy                            (from the Free Spoken Digit Dataset,
 #                                                     via data/speech/create_data.py)
+# The data can live anywhere: point train_path at it (e.g. on a larger disk).
 set -e
 cd "$(dirname "$0")/.."
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"  # works without `pip install -e .`
 
 for dataset_name in physics speech; do
   if [ "$dataset_name" = "physics" ]; then
@@ -18,18 +20,19 @@ for dataset_name in physics speech; do
   fi
 
   for lamb in 0.001 0.003 0.01 0.03 0.1 0.3 1 3 10; do
-    python train/train_rdub.py -V --dataset $train_path --data_dim $n --latent_dim $n \
+    python train/train_ub.py -V --model mlp_vae --dataset $train_path --latent_dim $n \
       --checkpoint_dir checkpoints/$dataset_name --prior_type maf --maf_stacks 3 \
       --posterior_type gaussian --encoder_units 500,500 --decoder_units 500,500 \
       --encoder_activation softplus --decoder_activation softplus --nats \
-      --lambda $lamb --epochs 100 --steps_per_epoch 1000 --lr 5e-4 --batchsize 256
+      --lambda $lamb --epochs 100 --lr 5e-4 --batchsize 256
   done
 
   for lamb in 100 300 1000 3000; do
-    python train/train_rdlb.py -V --dataset $train_path --data_dim $n \
-      --checkpoint_dir checkpoints/$dataset_name --model mlp --units 200,200,200 --lamb $lamb \
-      --command train --num_Ck_samples 1 --batchsize 2048 --last_step 4000 --checkpoint_interval 4000 \
+    lb_args="--dataset $train_path --checkpoint_dir checkpoints/$dataset_name
+      --model mlp --units 200,200,200 --lamb $lamb --batchsize 2048"
+    python train/train_lb.py -V $lb_args --num_Ck_samples 1 --last_step 4000 --checkpoint_interval 4000 \
       --y_init quick --y_quick_topn 10 --lr 5e-4
+    python evaluation/eval_lb.py -V $lb_args --num_Ck_samples 5
   done
 done
 
