@@ -13,20 +13,27 @@ from __future__ import annotations
 import argparse
 import os
 
+from rdsandwich.models.upper_bound.variable_rate_lossy_vae import PRESETS as VARIABLE_RATE_PRESETS
+from rdsandwich.models.upper_bound.variable_rate_lossy_vae import (
+    VariableRateLossyVAE,
+    VariableRateLossyVAEConfig,
+)
 from rdsandwich.models.upper_bound.ms2020_vae import MS2020VAE, MS2020VAEConfig
 from rdsandwich.models.upper_bound.mlp_vae import RDUBConfig, RDUBModel, check_no_decoder
-from rdsandwich.models.upper_bound.resnet_vae import ResNetVAE, ResNetVAEConfig
+from rdsandwich.models.upper_bound.resnet_vae import IMAGE_RANGES, ResNetVAE, ResNetVAEConfig
 from rdsandwich.utils.io import config_dict_to_str
-from rdsandwich.cli.common import add_data_args, add_run_args, example_shape, int_list, new_parser
+from rdsandwich.cli.common import add_data_args, add_run_args, example_shape, float_list, int_list, new_parser
 
-MODELS = ("mlp_vae", "resnet_vae", "ms2020_vae")
+MODELS = ("mlp_vae", "resnet_vae", "ms2020_vae", "variable_rate_lossy_vae")
 
 
 def add_model_args(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("model")
     g.add_argument("--model", required=True, choices=MODELS)
     g.add_argument("--lambda", type=float, default=0.01, dest="lmbda",
-                   help="R-D trade-off: loss = rate + lambda * distortion.")
+                   help="R-D trade-off: loss = rate + lambda * distortion. "
+                        "variable_rate_lossy_vae: Duan's lambda (KL nats/dim + lambda * MSE on [-1, 1]), used at "
+                        "evaluation only (training samples it from --lmb_range).")
 
     g = p.add_argument_group("mlp_vae (vector data)")
     g.add_argument("--latent_dim", type=int, default=None, help="Forced to data_dim when Z == Y.")
@@ -53,6 +60,10 @@ def add_model_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--ar_slices", type=int, default=8)
     g.add_argument("--scale_min", type=float, default=1e-5,
                    help="Floor on every Gaussian latent scale (numerical stability).")
+    g.add_argument("--image_range", choices=IMAGE_RANGES, default="0_255",
+                   help="0_255: loss = bpp + lambda * MSE on [0, 255] (Yang & Mandt). "
+                        "pm1: loss = KL nats/dim + lambda * MSE on [-1, 1] (Duan et al.; "
+                        "lambda_pm1 ~= 3756 * lambda_0_255).")
 
     g = p.add_argument_group("ms2020_vae")
     g.add_argument("--latent_depth", type=int, default=320)
@@ -60,9 +71,23 @@ def add_model_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--num_slices", type=int, default=10)
     g.add_argument("--max_support_slices", type=int, default=5)
 
+    g = p.add_argument_group("variable_rate_lossy_vae (variable rate)")
+    g.add_argument("--preset", choices=sorted(VARIABLE_RATE_PRESETS), default="base",
+                   help="Architecture preset (paper Tables 1 and 3).")
+    g.add_argument("--base_channels", type=int, default=None, help="Override the preset's C.")
+    g.add_argument("--latents_per_scale", type=int_list, default=None,
+                   help="Override the preset's latents at 1/64,1/32,1/16,1/8,1/4 resolution, e.g. 1,2,3,4,5.")
+    g.add_argument("--no_smooth", action="store_true",
+                   help="Disable the smoothing function on posterior/prior means (paper ablation).")
+    g.add_argument("--lmb_range", type=float_list, default=[4.0, 2048.0],
+                   help="Training lambda range, sampled log-uniformly per image.")
+
 
 def finalize_args(args, dataset) -> None:
     """Fill in values that depend on the model or the data (in place)."""
+    if args.model == "resnet_vae" and args.image_range == "pm1" and args.lmbda < 1.0:
+        print(f"WARNING: --image_range pm1 with --lambda {args.lmbda:g}: pm1 lambdas are Duan's "
+              f"(~3756x the 0_255 ones, e.g. 0.01 -> 37.6); this one gives a near-zero-rate model.")
     if args.model == "mlp_vae":
         if args.data_dim is None:
             shape = example_shape(dataset)
@@ -91,7 +116,7 @@ def build_model(args):
         return ResNetVAE(ResNetVAEConfig(
             latent_channels=args.latent_channels, num_filters=args.num_filters,
             ar_prior_levels=args.ar_prior_levels, ar_slices=args.ar_slices,
-            lmbda=args.lmbda, scale_min=args.scale_min,
+            lmbda=args.lmbda, scale_min=args.scale_min, image_range=args.image_range,
         ))
     if args.model == "ms2020_vae":
         return MS2020VAE(MS2020VAEConfig(
@@ -99,7 +124,18 @@ def build_model(args):
             num_filters=args.num_filters, num_slices=args.num_slices,
             max_support_slices=args.max_support_slices, lmbda=args.lmbda,
         ))
+    if args.model == "variable_rate_lossy_vae":
+        return VariableRateLossyVAE(variable_rate_config(args))
     raise ValueError(f"Unknown --model {args.model!r}")
+
+
+def variable_rate_config(args) -> VariableRateLossyVAEConfig:
+    if len(args.lmb_range) != 2:
+        raise SystemExit(f"--lmb_range needs two values, got {args.lmb_range}")
+    return VariableRateLossyVAEConfig.from_preset(
+        args.preset, base_channels=args.base_channels, latents_per_scale=args.latents_per_scale,
+        smooth=not args.no_smooth, lmb_range=tuple(args.lmb_range), lmbda=args.lmbda,
+    )
 
 
 def downsampling_factor(args) -> int:
@@ -108,7 +144,29 @@ def downsampling_factor(args) -> int:
         return 2 ** len(args.latent_channels)
     if args.model == "ms2020_vae":
         return 64  # analysis (16x) * hyper-analysis (4x)
+    if args.model == "variable_rate_lossy_vae":
+        return VariableRateLossyVAE.max_stride
     raise ValueError(f"{args.model!r} is not an image model")
+
+
+def model_key(args) -> str:
+    """Name of the model's R-D curve: ``rdub-model=<key>-...`` in run directories and
+    eval files. It includes whatever changes the curve but not lambda, so runs that
+    differ there (``-range=pm1``, another variable-rate architecture) are separate curves."""
+    if args.model == "variable_rate_lossy_vae":
+        # Variable rate: one model for every lambda.
+        cfg = variable_rate_config(args)
+        parts = [args.model, f"C={cfg.base_channels}",
+                 "L=" + "_".join(str(n) for n in cfg.latents_per_scale),
+                 f"lmb={cfg.lmb_range[0]:g}_{cfg.lmb_range[1]:g}"]
+        if not cfg.smooth:
+            parts.append("nosmooth")
+        if args.preset == "tiny":
+            parts.append("tiny")
+        return "-".join(parts)
+    if args.model == "resnet_vae" and args.image_range != "0_255":
+        return f"{args.model}-range={args.image_range}"
+    return args.model
 
 
 def get_runname(args) -> str:
@@ -122,7 +180,9 @@ def get_runname(args) -> str:
                          "prior_type", "posterior_type", "maf_stacks"),
             prefix="rdub",
         )
-    parts = [f"rdub-model={args.model}", f"lambda={args.lmbda:g}"]
+    if args.model == "variable_rate_lossy_vae":
+        return f"rdub-model={model_key(args)}"  # no lambda: one checkpoint serves every lambda
+    parts = [f"rdub-model={model_key(args)}", f"lambda={args.lmbda:g}"]
     if args.model == "resnet_vae":
         parts += [f"F={args.num_filters}",
                   "C=" + "_".join(str(c) for c in args.latent_channels),
@@ -131,6 +191,14 @@ def get_runname(args) -> str:
         parts += [f"ld={args.latent_depth}", f"hd={args.hyperprior_depth}",
                   f"ns={args.num_slices}", f"F={args.num_filters}"]
     return "-".join(parts)
+
+
+def checkpoint_filename(args) -> str:
+    """Final-checkpoint file name in the run directory; the variable-rate model has no
+    single lambda, so it is not in the name."""
+    if args.model == "variable_rate_lossy_vae":
+        return "ckpt.pt"
+    return f"ckpt-lambda={args.lmbda:g}.pt"
 
 
 def run_dir(args) -> str:
@@ -153,9 +221,12 @@ def build_train_parser() -> argparse.ArgumentParser:
                    help="Finite datasets: full passes over the data. Synthetic sources: "
                         "blocks of --steps_per_epoch steps.")
     g.add_argument("--steps_per_epoch", type=int, default=1000, help="Synthetic sources only.")
-    g.add_argument("--lr_schedule", choices=["piecewise", "plateau", "constant"], default="piecewise",
+    g.add_argument("--lr_schedule", choices=["piecewise", "plateau", "constant", "const-cos"],
+                   default="piecewise",
                    help="piecewise: x0.2 at 50/75/87.5%% of the epochs. plateau: halve the LR "
-                        "after --patience epochs without improvement, after --warmup epochs.")
+                        "after --patience epochs without improvement, after --warmup epochs. "
+                        "const-cos: constant for the first half of the epochs, then a cosine "
+                        "down to 0.01x (Duan et al.).")
     g.add_argument("--warmup", type=int, default=400, help="lr_schedule=plateau only.")
     g.add_argument("--patience", type=int, default=20, help="lr_schedule=plateau only.")
     g.add_argument("--grad_clip", type=float, default=None,
@@ -163,6 +234,11 @@ def build_train_parser() -> argparse.ArgumentParser:
     g.add_argument("--skip_nonfinite", type=int, default=0,
                    help="Skip up to this many consecutive steps with non-finite gradients "
                         "(each one still writes an explosion report); 0 = abort on the first.")
+    g.add_argument("--ema", type=float, default=None, metavar="DECAY",
+                   help="Keep an exponential moving average of the weights with this decay "
+                        "(e.g. 0.9999); saved in the checkpoint and evaluated by default.")
+    g.add_argument("--ema_warmup", type=int, default=10_000,
+                   help="EMA warmup in steps: decay = DECAY * (1 - exp(-step / ema_warmup)).")
     g.add_argument("--amp", action="store_true", help="Mixed precision (fp16 autocast + grad scaler).")
     g.add_argument("--compile", action="store_true",
                    help="torch.compile model.get_losses (large speedup for image models; "
@@ -191,6 +267,6 @@ def build_eval_parser() -> argparse.ArgumentParser:
                         "auto: full_image for image folders, sampled otherwise.")
     g.add_argument("--batchsize", type=int, default=1024, help="sampled mode only.")
     g.add_argument("--num_batches", type=int, default=100, help="sampled mode only.")
-    g.add_argument("--no_cast_xhat", action="store_true",
-                   help="full_image mode: don't round the reconstruction to uint8 (clip only).")
+    g.add_argument("--no_ema", action="store_true",
+                   help="Evaluate the raw weights even if the checkpoint has EMA weights.")
     return p

@@ -42,21 +42,30 @@ def evaluate_sampled(model: nn.Module, source, batchsize: int, num_batches: int,
                 mse_mean=d_mean, mse_std=d_std, mse_ci=d_ci)
 
 
+def _psnr(mse: float) -> float:
+    return 20 * math.log10(255.0) - 10 * math.log10(max(mse, 1e-12))
+
+
 @torch.no_grad()
 def evaluate_full_images(model: nn.Module, images: Iterable[torch.Tensor], pad_factor: int,
-                         cast_xhat: bool = True, device=None) -> Dict[str, np.ndarray]:
+                         device=None) -> Dict[str, np.ndarray]:
     """Per-image bpp / MSE / PSNR on whole images in [0, 255].
 
     Each ``[1, 3, H, W]`` image is reflect-padded to a multiple of ``pad_factor``
     (the model's total downsampling), passed through ``model``, and the
-    reconstruction is cropped back to ``H x W``. With ``cast_xhat`` the
-    reconstruction is rounded to uint8 values (a discretized decoder); otherwise
-    it is only clipped to [0, 255]. Rate is the model's bits over the
-    *original* pixel count.
+    reconstruction is cropped back to ``H x W`` and clipped to [0, 255]. Rate is
+    the model's bits over the *original* pixel count.
+
+    Distortion is reported twice from the same forward pass (the latents are
+    sampled, so two passes would differ): ``mse`` / ``psnr`` on the clipped
+    reconstruction, and ``mse_uint8`` / ``psnr_uint8`` with it also rounded to
+    8-bit values. Both are valid upper-bound points (rounding is a function of
+    ``x_hat``, so it cannot increase the information); rounding adds ~1/12 to
+    the MSE once errors span several grey levels.
     """
     device = device or next(model.parameters()).device
     model.eval()
-    bpps, mses, psnrs = [], [], []
+    res = {k: [] for k in ("bpp", "mse", "psnr", "mse_uint8", "psnr_uint8")}
     for x in images:
         x = x.to(device)
         _, _, H, W = x.shape
@@ -64,10 +73,11 @@ def evaluate_full_images(model: nn.Module, images: Iterable[torch.Tensor], pad_f
         xp = F.pad(x, (0, pad_w, 0, pad_h), mode="reflect") if (pad_h or pad_w) else x
         out = model(xp)
         x_hat = torch.clamp(out["x_hat"][:, :, :H, :W], 0.0, 255.0)
-        if cast_xhat:
-            x_hat = torch.round(x_hat)
         mse = torch.mean((x - x_hat) ** 2).item()
-        bpps.append(out["bits"].sum().item() / (H * W))
-        mses.append(mse)
-        psnrs.append(20 * math.log10(255.0) - 10 * math.log10(max(mse, 1e-12)))
-    return dict(bpp=np.array(bpps), mse=np.array(mses), psnr=np.array(psnrs))
+        mse_uint8 = torch.mean((x - torch.round(x_hat)) ** 2).item()
+        res["bpp"].append(out["bits"].sum().item() / (H * W))
+        res["mse"].append(mse)
+        res["psnr"].append(_psnr(mse))
+        res["mse_uint8"].append(mse_uint8)
+        res["psnr_uint8"].append(_psnr(mse_uint8))
+    return {k: np.array(v) for k, v in res.items()}

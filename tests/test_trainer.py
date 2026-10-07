@@ -6,7 +6,8 @@ import torch
 import torch.nn as nn
 
 from rdsandwich.data.base import build_loader
-from rdsandwich.utils.trainer import BaseTrainer, WarmupReduceLROnPlateau
+from rdsandwich.utils.lr_schedulers import WarmupReduceLROnPlateau
+from rdsandwich.utils.trainer import BaseTrainer
 
 
 class _Src:

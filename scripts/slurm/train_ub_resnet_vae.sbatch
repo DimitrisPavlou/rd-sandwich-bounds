@@ -1,7 +1,7 @@
 #!/bin/bash
 # --- VUB-HPC (Hydra) GPU job — natural-images ResNet-VAE R-D UPPER BOUND ------
 # Follows the VUB group template (Miniconda3 module + conda env in $VSC_SCRATCH,
-# hopper_gpu / H100). Mirrors configs/natural_images_resnet_vae_train.yaml.
+# hopper_gpu / H100). Mirrors configs/images/resnet_vae_train_ub.yaml.
 #
 # Each array task runs ONE lambda on ONE GPU (training is single-GPU, no DDP),
 # so all 6 lambdas sweep in parallel across the cluster.

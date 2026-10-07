@@ -1,5 +1,6 @@
 """Tests for the model-agnostic UpperBoundTrainer options and the UB evaluators."""
 import numpy as np
+import pytest
 import torch
 import torch.nn as nn
 
@@ -112,8 +113,32 @@ def test_evaluate_full_images_pads_and_crops():
     # Odd sizes: not multiples of the 2**len(latent_channels) = 4 downsampling factor.
     images = [torch.rand(1, 3, 30, 34) * 255.0, torch.rand(1, 3, 33, 29) * 255.0]
     res = evaluate_full_images(model, images, pad_factor=4)
-    assert {k: v.shape for k, v in res.items()} == {"bpp": (2,), "mse": (2,), "psnr": (2,)}
-    assert (res["bpp"] > 0).all() and (res["mse"] >= 0).all()
+    assert {k: v.shape for k, v in res.items()} == {
+        k: (2,) for k in ("bpp", "mse", "psnr", "mse_uint8", "psnr_uint8")}
+    assert (res["bpp"] > 0).all() and (res["mse"] >= 0).all() and (res["mse_uint8"] >= 0).all()
+
+
+class _ShiftModel(nn.Module):
+    """Reconstructs x + shift exactly, with 1 bit per image."""
+
+    def __init__(self, shift):
+        super().__init__()
+        self.shift = shift
+        self.p = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        return dict(x_hat=x + self.shift, bits=torch.ones(x.shape[0]))
+
+
+def test_evaluate_full_images_rounding_and_clipping():
+    x = torch.randint(1, 255, (1, 3, 8, 8)).float()   # integer pixels away from 0 and 255
+    res = evaluate_full_images(_ShiftModel(0.3), [x], pad_factor=1)
+    assert res["mse"][0] == pytest.approx(0.09, rel=1e-4)   # unrounded: error 0.3 (float32)
+    assert res["mse_uint8"][0] == 0.0                       # rounded back onto x
+    assert res["psnr_uint8"][0] == pytest.approx(20 * np.log10(255.0) + 120.0)  # mse floor 1e-12
+    assert res["bpp"][0] == pytest.approx(1.0 / 64)
+    res = evaluate_full_images(_ShiftModel(1000.0), [x], pad_factor=1)
+    assert res["mse"][0] == pytest.approx(((255.0 - x) ** 2).mean().item())  # clipped to 255
 
 
 def test_evaluate_sampled_reports_ci():

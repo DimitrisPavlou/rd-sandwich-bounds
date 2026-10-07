@@ -5,9 +5,12 @@ Pass the same model flags (and lambda / checkpoint_dir) as for training: they
 determine the run directory, whose newest checkpoint is loaded (or ``--ckpt``).
 
 * ``--mode full_image`` (default for image folders): per-image bpp / MSE / PSNR
-  on whole Kodak/Tecnick images, saved to
-  ``<results_dir>/rdub-model=<model>-lambda=<lambda>-dataset=<name>.npz``
-  (read by ``evaluation/plot_qr.py``).
+  on whole Kodak/Tecnick images (unrounded and 8-bit-rounded reconstructions),
+  saved to ``<results_dir>/rdub-model=<key>-lambda=<lambda>-dataset=<name>.npz``,
+  where ``<key>`` is the model plus any curve-defining tags (e.g.
+  ``resnet_vae-range=pm1``; see ``model_key``). Read by ``evaluation/plot_qr.py``.
+  For the variable-rate ``variable_rate_lossy_vae``, run once per ``--lambda`` on the same
+  checkpoint.
 * ``--mode sampled`` (default otherwise): (D, R) mean / std / 95% CI over
   ``--num_batches`` batches, saved to ``<results_dir>/<run name>-dataset=<name>.npz``.
 
@@ -26,6 +29,7 @@ from rdsandwich.cli.upper_bound import (
     downsampling_factor,
     finalize_args,
     get_runname,
+    model_key,
     run_dir,
 )
 from rdsandwich.data.datasets import dataset_name
@@ -46,9 +50,10 @@ def main():
     ckpt = args.ckpt or latest_checkpoint(run_dir(args))
     if ckpt is None:
         raise SystemExit(f"No checkpoint found in {run_dir(args)!r}; train this run first.")
-    load_checkpoint(ckpt, model, map_location=device)
+    extra = load_checkpoint(ckpt, model, map_location=device, use_ema=not args.no_ema)
     model.eval()
-    print(f"Loaded {ckpt}")
+    weights = "EMA" if ("ema_state_dict" in extra and not args.no_ema) else "raw"
+    print(f"Loaded {ckpt} ({weights} weights)")
 
     mode = args.mode
     if mode == "auto":
@@ -60,12 +65,13 @@ def main():
         if not is_image_dataset(dataset):
             raise SystemExit("--mode full_image needs an image-folder --dataset.")
         res = evaluate_full_images(model, dataset.all_images(), pad_factor=downsampling_factor(args),
-                                   cast_xhat=not args.no_cast_xhat, device=device)
+                                   device=device)
         out_path = os.path.join(
-            args.results_dir, f"rdub-model={args.model}-lambda={args.lmbda:g}-dataset={dsname}.npz")
+            args.results_dir, f"rdub-model={model_key(args)}-lambda={args.lmbda:g}-dataset={dsname}.npz")
         np.savez(out_path, **res)
         print(f"[{dsname}] n={len(res['bpp'])}  bpp={res['bpp'].mean():.4f}  "
-              f"mse={res['mse'].mean():.4f}  psnr={res['psnr'].mean():.4f}  ->  {out_path}")
+              f"mse={res['mse'].mean():.4f}  psnr={res['psnr'].mean():.4f}  "
+              f"(8-bit: psnr={res['psnr_uint8'].mean():.4f})  ->  {out_path}")
     else:
         res = evaluate_sampled(model, dataset, args.batchsize, args.num_batches, device=device)
         out_path = os.path.join(args.results_dir, f"{get_runname(args)}-dataset={dsname}.npz")

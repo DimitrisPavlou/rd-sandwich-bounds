@@ -49,7 +49,7 @@ def test_params_to_argv_types():
 def test_load_and_expand_gaussian_config():
     import math
 
-    path = os.path.join(os.path.dirname(__file__), "..", "configs", "gaussian_ub.yaml")
+    path = os.path.join(os.path.dirname(__file__), "..", "configs", "gaussian/mlp_vae_train_ub.yaml")
     config = load_config(path)
     assert config["script"] == "train_ub"
     runs = expand_sweep(config)
@@ -75,3 +75,14 @@ def test_script_list_and_script_args():
     # script_args override fixed/sweep, for that script only
     assert script_params(config, "eval_lb", run)["num_Ck_samples"] == 5
     assert "lr" not in script_params(config, "eval_lb", run)
+
+
+def test_run_sweep_index_selects_one_run():
+    import pytest
+    from scripts.run_sweep import select_runs
+
+    runs = [["a"], ["b"], ["c"]]
+    assert select_runs(runs, None) == runs
+    assert select_runs(runs, 1) == [["b"]]
+    with pytest.raises(SystemExit, match="out of range"):
+        select_runs(runs, 3)

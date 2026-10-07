@@ -4,13 +4,18 @@ from __future__ import annotations
 import argparse
 from typing import List
 
-from rdsandwich.data.image import ImageFolderDataset
+from rdsandwich.data.image import SMALL_IMAGE_MODES, ImageFolderDataset
 from rdsandwich.data.datasets import get_dataset
 
 
 def int_list(s: str) -> List[int]:
     """Parse ``"4,8,16"`` -> ``[4, 8, 16]`` (an empty string gives ``[]``)."""
     return [int(i) for i in s.split(",") if i]
+
+
+def float_list(s: str) -> List[float]:
+    """Parse ``"4,2048"`` -> ``[4.0, 2048.0]``."""
+    return [float(i) for i in s.split(",") if i]
 
 
 def new_parser(description: str) -> argparse.ArgumentParser:
@@ -46,6 +51,11 @@ def add_data_args(p: argparse.ArgumentParser) -> None:
                         "forces num_workers=0.")
     g.add_argument("--num_workers", type=int, default=0,
                    help="DataLoader worker processes (finite datasets only).")
+    g.add_argument("--hflip", action="store_true",
+                   help="Images only: mirror each training patch left-right with probability 0.5.")
+    g.add_argument("--small_image_mode", choices=SMALL_IMAGE_MODES, default="resize",
+                   help="Images only, for images smaller than --patchsize: resize them up, or "
+                        "mirror-pad them as in Duan et al. (RandomCrop(pad_if_needed, reflect)).")
 
 
 def load_dataset(args, device):
@@ -54,6 +64,7 @@ def load_dataset(args, device):
     return get_dataset(
         args.dataset, data_dim=args.data_dim, gparams_path=args.gparams_path, seed=args.seed,
         device=device, patchsize=args.patchsize, max_images=args.max_images, preload=args.preload,
+        hflip=args.hflip, small_image_mode=args.small_image_mode,
     )
 
 

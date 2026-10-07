@@ -31,6 +31,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 from rdsandwich.data.base import Source
+import torchvision.transforms.functional as TF
 
 
 def _read_uint8(path: str) -> torch.Tensor:
@@ -45,20 +46,45 @@ def _read_uint8(path: str) -> torch.Tensor:
     return torch.from_numpy(arr).permute(2, 0, 1).contiguous()  # [3, H, W] uint8
 
 
-def _random_crop(t: torch.Tensor, patchsize: Optional[int]) -> torch.Tensor:
+SMALL_IMAGE_MODES = ("resize", "reflect_pad")
+
+
+def _reflect_pad_to(t: torch.Tensor, size: int) -> torch.Tensor:
+    """Mirror-pad a CHW tensor so both spatial sides are at least ``size``.
+
+    Same as torchvision's ``RandomCrop(size, pad_if_needed=True, padding_mode='reflect')``
+    on a PIL image: each too-short side is padded on *both* ends by its shortfall
+    (``size - side``) with ``numpy.pad(mode="reflect")``, which keeps reflecting back
+    and forth for pads longer than the image, so any image size works.
+    """
+    _, h, w = t.shape
+    pad_h = size - h if h < size else 0
+    pad_w = size - w if w < size else 0
+    if not (pad_h or pad_w):
+        return t
+    arr = np.pad(t.numpy(), ((0, 0), (pad_h, pad_h), (pad_w, pad_w)), mode="reflect")
+    return torch.from_numpy(arr)
+
+
+def _random_crop(t: torch.Tensor, patchsize: Optional[int],
+                 small_image_mode: str = "resize") -> torch.Tensor:
     """Take a random ``patchsize`` spatial crop from a CHW tensor.
 
     Dtype-agnostic (works on the stored ``uint8`` or on a float tensor). If the
-    image is smaller than the patch it is resized up first (rare; matches the
-    original behaviour). Returns a view (a plain slice) in the common case.
+    image is smaller than the patch it is first resized up (``small_image_mode=
+    "resize"``, the original behaviour) or mirror-padded (``"reflect_pad"``, as in
+    Duan et al.'s training; see ``_reflect_pad_to``). Returns a view (a plain
+    slice) in the common case.
     """
     if patchsize is None:
         return t
     _, h, w = t.shape
     ps = patchsize
-    if h < ps or w < ps:
+    if (h < ps or w < ps) and small_image_mode == "reflect_pad":
+        t = _reflect_pad_to(t, ps)
+        _, h, w = t.shape
+    elif h < ps or w < ps:
         # Lazy import so the common crop-only path never needs torchvision.
-        import torchvision.transforms.functional as TF
         t = TF.resize(t, [max(ps, h), max(ps, w)], antialias=True)
         _, h, w = t.shape
     top = random.randint(0, h - ps)
@@ -95,7 +121,10 @@ class ImageFolderDataset(Source, Dataset):
         (Kodak / Tecnick) evaluation.
 
     ``patchsize=None`` disables cropping. ``max_images`` optionally caps the set
-    (e.g. for smoke tests).
+    (e.g. for smoke tests). Training patches (``__getitem__`` / ``sample``) can be
+    mirrored left-right with probability 0.5 (``hflip``), and images smaller than
+    the patch are resized up or mirror-padded (``small_image_mode``, see
+    ``_random_crop``). ``all_images()`` is never augmented.
 
     ``preload=True`` decodes the whole (capped) set into RAM **once** at
     construction, as ``uint8`` CHW tensors, so nothing is re-decoded afterwards
@@ -106,9 +135,15 @@ class ImageFolderDataset(Source, Dataset):
     """
 
     def __init__(self, root_or_glob: str, patchsize: Optional[int] = 256,
-                 max_images: Optional[int] = None, preload: bool = False):
+                 max_images: Optional[int] = None, preload: bool = False,
+                 hflip: bool = False, small_image_mode: str = "resize"):
         if patchsize is not None and patchsize <= 0:
             raise ValueError("patchsize must be positive or None")
+        if small_image_mode not in SMALL_IMAGE_MODES:
+            raise ValueError(f"small_image_mode must be one of {SMALL_IMAGE_MODES}, "
+                             f"got {small_image_mode!r}")
+        self.hflip = hflip
+        self.small_image_mode = small_image_mode
         paths = _find_paths(root_or_glob)
         self.paths = paths[:max_images] if max_images else paths
         self.patchsize = patchsize
@@ -127,7 +162,10 @@ class ImageFolderDataset(Source, Dataset):
         return len(self.paths)
 
     def __getitem__(self, index: int) -> torch.Tensor:
-        return _random_crop(self._image(index), self.patchsize).float()  # [3, ps, ps] in [0, 255]
+        patch = _random_crop(self._image(index), self.patchsize, self.small_image_mode)
+        if self.hflip and random.random() < 0.5:
+            patch = patch.flip(-1)
+        return patch.float()  # [3, ps, ps] in [0, 255]
 
     def sample(self, batchsize: int) -> torch.Tensor:
         if batchsize <= 0:

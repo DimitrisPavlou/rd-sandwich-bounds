@@ -1,0 +1,63 @@
+# =============================================================================
+# TEMPLATE: R-D UPPER BOUND, evaluation  ->  evaluation/eval_ub.py   (model: variable_rate_lossy_vae)
+# =============================================================================
+# Evaluates Duan et al.'s variable-rate model on whole test images (Kodak, Tecnick).
+# One checkpoint serves every lambda, so each lambda in the sweep is one point on the
+# curve: per-image bpp, MSE and PSNR on the [0, 255] scale (unrounded and 8-bit-
+# rounded), written to <results_dir>/rdub-model=<key>-lambda=<lambda>-dataset=<name>.npz
+# for evaluation/plot_qr.py. Experiments: images/variable_rate_lossy_vae_eval_ub.yaml.
+#
+# Lists EVERY flag evaluation/eval_ub.py accepts for this model, as (type, default)
+# plus a one-line description, in three sections: 1. data, 2. model, 3. evaluation.
+# The architecture flags and checkpoint_dir must match the training run.
+#
+# Run:   python scripts/run_sweep.py --config configs/templates/images/variable_rate_lossy_vae_eval_ub.template.yaml
+#        (add --dry-run to print the commands, -j N to run N concurrently)
+#
+# Conventions: bool true -> --flag ; false/null -> omitted ; list -> --flag a,b.
+# =============================================================================
+
+script: eval_ub
+
+fixed:
+  # ===== 1. data =============================================================
+  # dataset: SWEPT below        # (str, REQUIRED)  test images: a directory or glob, used as given.
+  # max_images: null            # (int, null)  use only the first N images (quick checks).
+  # patchsize: null             # (int, null)  [mode: sampled only] crop size; full-image eval uses whole images.
+  # hflip: false                # (bool, false)  [mode: sampled only] mirror the sampled crops.
+  # small_image_mode: resize    # (str, resize)  [mode: sampled only] images smaller than patchsize.
+  # preload: false              # (bool, false)  decode every image into RAM once.
+  # num_workers: 0              # (int, 0)  DataLoader worker processes (unused by full-image eval).
+  # data_dim: null              # (int, null)  vector data only; unused for images.
+  # gparams_path: null          # (str, null)  "gaussian" source only; unused for images.
+
+  # ===== 2. model (must match the training run) ==============================
+  model: variable_rate_lossy_vae   # (str, REQUIRED)  mlp_vae | resnet_vae | ms2020_vae | variable_rate_lossy_vae.
+  # lambda: SWEPT below         # (float, 0.01)  lambda to evaluate at (Duan's units); must lie in lmb_range.
+  preset: base                  # (str, base)  base | c96_l15 | c64_l15 | c64_l10 | c64_l5 | c32_l15 | tiny.
+  # base_channels: 128          # (int, null)  the training run's override of the preset's C, if any.
+  # latents_per_scale: [1, 2, 3, 4, 5]   # (list[int], null)  the training run's override, if any.
+  no_smooth: false              # (bool, false)  the training run's smoothing setting.
+  lmb_range: [4.0, 2048.0]      # (list[float], [4, 2048])  the training run's lambda range.
+
+  # ===== 3. evaluation =======================================================
+  checkpoint_dir: checkpoints/templates   # (str, ./checkpoints)  where the training run wrote its run directory.
+  # ckpt: path/to/ckpt.pt       # (str, null)  evaluate this checkpoint file instead of the newest one.
+  no_ema: false                 # (bool, false)  use the raw weights even if the checkpoint has EMA weights.
+  results_dir: results/templates   # (str, results)  where the result .npz files are written.
+  mode: auto                    # (str, auto)  full_image (per-image bpp/MSE/PSNR on whole images) |
+                                #   sampled ((D, R) mean +/- 95% CI over random batches) |
+                                #   auto (full_image for image folders, sampled otherwise).
+  # batchsize: 1024             # (int, 1024)  [mode: sampled only] batch size.
+  # num_batches: 100            # (int, 100)  [mode: sampled only] number of batches.
+  seed: 0                       # (int, 0)  random seed (the latents are sampled).
+  # device: cuda                # (str, null)  e.g. cuda, cuda:1, cpu; null = cuda if available.
+  verbose: true                 # (bool, false)  print progress.
+
+sweep:
+  # model section: the 6-value grid of the fixed-rate models plus 16 values log-spaced over [4, 2048]
+  lambda: [4.0, 6.063, 8, 9.19, 13.93, 21.11, 22.6, 32.0, 48.5, 64, 73.52, 111.4,
+           168.9, 181, 256.0, 388.0, 512, 588.1, 891.4, 1351.0, 1448, 2048.0]
+  dataset:                      # data section: the test sets
+    - data/kodak
+    - data/Tecnick_TESTIMAGES/RGB/RGB_OR_1200x1200

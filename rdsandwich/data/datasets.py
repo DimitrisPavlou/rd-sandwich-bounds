@@ -23,6 +23,8 @@ def get_dataset(
     patchsize: Optional[int] = None,
     max_images: Optional[int] = None,
     preload: bool = False,
+    hflip: bool = False,
+    small_image_mode: str = "resize",
 ):
     """Build a dataset from a ``--dataset`` spec.
 
@@ -34,7 +36,8 @@ def get_dataset(
         absolute -- e.g. a large dataset on another disk):
           a ``.npy`` / ``.npz`` file    -> ``ArraySource`` (rows are samples), placed on ``device``
           a directory or glob of images -> ``ImageFolderDataset`` (``patchsize`` crops;
-                                           ``None`` = whole images), kept on the CPU
+                                           ``None`` = whole images; ``hflip`` and
+                                           ``small_image_mode`` augment the crops), kept on the CPU
     """
     if spec == "gaussian":
         if gparams_path:
@@ -53,7 +56,8 @@ def get_dataset(
             raise FileNotFoundError(f"No such array file: {spec!r}")
         return load_array_source(spec, device=device)
     if os.path.isdir(spec) or glob.glob(spec):
-        return ImageFolderDataset(spec, patchsize=patchsize, max_images=max_images, preload=preload)
+        return ImageFolderDataset(spec, patchsize=patchsize, max_images=max_images, preload=preload,
+                                  hflip=hflip, small_image_mode=small_image_mode)
     raise ValueError(
         f"Unknown dataset {spec!r}: expected one of {SYNTHETIC_DATASETS}, a .npy/.npz file, "
         "or an existing image directory/glob."

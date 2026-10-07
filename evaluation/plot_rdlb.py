@@ -2,7 +2,7 @@
 """Aggregate an R-D lower-bound sweep and plot the lower bound vs the true R(D).
 
 Companion to ``plot_rdub.py``. After running e.g.
-``scripts/run_sweep.py --config configs/gaussian_lb.yaml`` (the paper's
+``scripts/run_sweep.py --config configs/gaussian/mlp_train_eval_lb.yaml`` (the paper's
 varying-dimension standard-Gaussian LB study, Sec. 6.1 / Fig. 2a-bottom), each
 run folder ``rdlb-dd=<n>-...-lamb=<lambda>-...`` holds an ``rd-*.npz`` written
 by ``evaluation/eval_lb.py``. Each such file gives one number ``R_`` = the

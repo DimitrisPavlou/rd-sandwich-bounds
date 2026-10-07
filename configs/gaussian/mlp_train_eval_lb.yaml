@@ -6,7 +6,7 @@
 # Each run is trained (train_lb, fast "quick" inner optimizer) and then evaluated
 # (eval_lb, exhaustive inner optimizer), which writes the reported rd-*.npz.
 #
-# Run it with:  python scripts/run_sweep.py --config configs/gaussian_lb.yaml
+# Run it with:  python scripts/run_sweep.py --config configs/gaussian/mlp_train_eval_lb.yaml
 #
 # NOTE: these are STANDARD Gaussians (no gparams_path) and a separate checkpoint_dir from the
 # n=1000 upper-bound runs, because this is the paper's own LB study (Fig. 2a-bottom), not a
@@ -17,11 +17,16 @@ script: [train_lb, eval_lb]
 
 # Flags passed to both train_lb and eval_lb (they locate the same run directory).
 fixed:
+  # ===== 1. data =============================================================
   dataset: gaussian            # standard Gaussian N(0, I) (no gparams_path)
+
+  # ===== 2. model ============================================================
   model: mlp
   hidden_units_per_dim: 20     # -> units = [20n, 20n]  (paper A.5.2)
   num_hidden_layers: 2
   activation: selu
+
+  # ===== 3. training and evaluation ==========================================
   checkpoint_dir: checkpoints/gaussian_lb
   batchsize: 1024              # k (paper fixes k=1024 for the varying-n LB study)
   y_quick_topn: 10

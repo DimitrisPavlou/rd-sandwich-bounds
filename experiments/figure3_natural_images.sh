@@ -29,7 +29,7 @@ OUT_DIR="${OUT_DIR:-results}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
 DEV=${DEVICE:+--device $DEVICE}
 
-# Must match the training architecture (configs/natural_images_resnet_vae_train.yaml).
+# Must match the training architecture (configs/images/resnet_vae_train_ub.yaml).
 arch="--model resnet_vae --latent_channels 4,8,16,32,64,128 --ar_prior_levels 4 --ar_slices 8 --num_filters 256"
 run_suffix="-F=256-C=4_8_16_32_64_128-arlv=4-arsl=8"
 

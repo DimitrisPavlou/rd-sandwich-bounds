@@ -9,6 +9,7 @@ batches, the same trainer works across every source in ``rdsandwich.data``.
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -20,41 +21,10 @@ import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import IterableDataset
+from tqdm import tqdm
 
 from rdsandwich.utils.io import JsonlLogger, MyJSONEncoder, get_time_str, latest_checkpoint, load_checkpoint, save_checkpoint
-
-
-class WarmupReduceLROnPlateau:
-    """``ReduceLROnPlateau`` that ignores the first ``warmup`` epochs.
-
-    Mirrors the original repo's ``MyReduceLROnPlateauCallback``: the learning
-    rate is held constant during warmup, then reduced by ``factor`` after
-    ``patience`` epochs without ``min_delta`` improvement, down to ``min_lr``.
-    """
-
-    def __init__(self, optimizer, *, factor=0.5, patience=10, warmup=100,
-                 min_lr=1e-6, min_delta=1e-4, mode="min", verbose=False):
-        self.optimizer = optimizer
-        self.warmup = warmup
-        self._plateau = ReduceLROnPlateau(
-            optimizer, mode=mode, factor=factor, patience=patience,
-            min_lr=min_lr, threshold=min_delta, threshold_mode="abs",
-        )
-        self.verbose = verbose
-        self._epoch = 0
-
-    def step(self, metric: float) -> None:
-        if self._epoch >= self.warmup:
-            self._plateau.step(metric)
-        self._epoch += 1
-
-    def state_dict(self):
-        return {"epoch": self._epoch, "plateau": self._plateau.state_dict()}
-
-    def load_state_dict(self, state):
-        self._epoch = state.get("epoch", 0)
-        if "plateau" in state:
-            self._plateau.load_state_dict(state["plateau"])
+from rdsandwich.utils.lr_schedulers import WarmupReduceLROnPlateau
 
 
 class BaseTrainer:
@@ -81,6 +51,8 @@ class BaseTrainer:
         max_nonfinite_skips: int = 0,
         amp_nonfinite_patience: int = 20,
         history_len: int = 50,
+        ema_decay: Optional[float] = None,
+        ema_warmup: int = 10_000,
     ):
         self.device = device or next(model.parameters()).device
         self.model = model.to(self.device)
@@ -107,9 +79,17 @@ class BaseTrainer:
         # Last few steps (loss/metrics/grad norm) for the explosion report.
         self._recent_steps: deque = deque(maxlen=history_len)
         self.start_epoch = 0
+        # Optimizer steps taken so far, across epochs and resumes (drives the EMA warmup).
+        self.global_step = 0
         use_cuda = self.device.type == "cuda"
         self.amp = bool(amp and use_cuda)
         self.scaler = torch.amp.GradScaler(self.device.type, enabled=self.amp)
+        # Exponential moving average of the weights (evaluated instead of the raw weights).
+        self.ema_decay = ema_decay
+        self.ema_warmup = ema_warmup
+        self.ema_model: Optional[nn.Module] = None
+        if ema_decay is not None:
+            self.ema_model = copy.deepcopy(self.model).eval().requires_grad_(False)
         if resume:
             self._maybe_resume()
         # Only the infinite (analytic-source) path pulls batches through this
@@ -128,6 +108,10 @@ class BaseTrainer:
             return
         extra = load_checkpoint(path, self.model, self.optimizer, map_location=self.device)
         self.start_epoch = int(extra.get("epoch", 0)) + 1
+        self.global_step = int(extra.get("global_step", 0))
+        if self.ema_model is not None:
+            # A checkpoint without EMA weights restarts the average from the loaded weights.
+            self.ema_model.load_state_dict(extra.get("ema_state_dict", self.model.state_dict()))
         if self.scheduler is not None and extra.get("scheduler") is not None:
             try:
                 self.scheduler.load_state_dict(extra["scheduler"])
@@ -137,6 +121,20 @@ class BaseTrainer:
             self.scaler.load_state_dict(extra["scaler"])
         if self.verbose:
             print(f"Resumed from {path} at epoch {self.start_epoch}")
+
+    @torch.no_grad()
+    def _ema_update(self) -> None:
+        """``ema <- d * ema + (1 - d) * weights`` with Duan et al.'s warmup
+        ``d = ema_decay * (1 - exp(-step / ema_warmup))``, so early on the average follows
+        the weights closely. Floating-point buffers are averaged too; others are copied."""
+        d = self.ema_decay * (1.0 - math.exp(-self.global_step / self.ema_warmup))
+        model_state = self.model.state_dict()
+        for name, ema_v in self.ema_model.state_dict().items():
+            v = model_state[name].detach()
+            if ema_v.is_floating_point():
+                ema_v.lerp_(v, 1.0 - d)
+            else:
+                ema_v.copy_(v)
 
     # ----------------------------------------------------------------- #
     # Hooks for subclasses
@@ -319,11 +317,20 @@ class BaseTrainer:
             for batch in self.loader:
                 yield batch.to(self.device)
 
+    def _steps_in_epoch(self) -> Optional[int]:
+        """Batches per epoch (for the progress bar), or None if unknown."""
+        if self._is_infinite_loader():
+            return self.steps_per_epoch
+        return len(self.loader) if hasattr(self.loader, "__len__") else None
+
     def _save(self, epoch: int, history: Dict[str, list], path: Optional[str] = None) -> None:
         path = path or self.ckpt_path
         if not path:
             return
-        extra = {"history": dict(history), "epoch": epoch, **self.checkpoint_extra()}
+        extra = {"history": dict(history), "epoch": epoch, "global_step": self.global_step,
+                 **self.checkpoint_extra()}
+        if self.ema_model is not None:
+            extra["ema_state_dict"] = self.ema_model.state_dict()
         if self.scheduler is not None and hasattr(self.scheduler, "state_dict"):
             extra["scheduler"] = self.scheduler.state_dict()
         if self.amp:
@@ -347,7 +354,11 @@ class BaseTrainer:
             n_steps = 0
             gn_sum, gn_max, n_gn, n_clipped, n_nonfinite = 0.0, 0.0, 0, 0, 0
             max_norm = self.grad_clip if self.grad_clip is not None else math.inf
-            for x in self._epoch_batches():
+            # Per-epoch progress bar (verbose only), showing the epoch's running averages;
+            # it is cleared at the end of the epoch, when the epoch summary is printed.
+            pbar = tqdm(self._epoch_batches(), total=self._steps_in_epoch(), desc=f"epoch {epoch}",
+                        leave=False, dynamic_ncols=True, disable=not self.verbose)
+            for x in pbar:
                 self.optimizer.zero_grad(set_to_none=True)
                 with torch.autocast(device_type=self.device.type, enabled=self.amp):
                     loss, metrics = self.train_step(x)
@@ -394,6 +405,9 @@ class BaseTrainer:
                         continue
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
+                self.global_step += 1
+                if self.ema_model is not None:
+                    self._ema_update()
                 loss_val = loss.item()
                 running["loss"] += loss_val
                 for k, v in metrics.items():
@@ -402,6 +416,8 @@ class BaseTrainer:
                                            "grad_norm": grad_norm,
                                            **{k: float(v) for k, v in metrics.items()}})
                 n_steps += 1
+                pbar.set_postfix({k: f"{v / n_steps:.4g}" for k, v in running.items()}, refresh=False)
+            pbar.close()
             n_updates = max(n_steps - (0 if self.amp else n_nonfinite), 1)
             for k in running:
                 running[k] /= n_updates

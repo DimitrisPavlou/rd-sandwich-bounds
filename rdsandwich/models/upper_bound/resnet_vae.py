@@ -23,11 +23,21 @@ Kingma et al. 2016 for the components):
     :class:`DeepFactorized` prior (fully convolutional, so the model runs on
     images of any size that is a multiple of the total downsampling).
 
-The objective is the rate-distortion Lagrangian ``bpp + lambda * MSE`` computed
-on images in the ``[0, 255]`` range (matching the paper and the neural-
-compression baselines it compares against). ``get_losses`` returns
-``(loss, rate=bpp, mse)``; ``forward`` returns a dict with per-image metrics for
-evaluation.
+The objective depends on ``image_range``:
+
+  * ``"0_255"`` (default; the paper's convention): ``bpp + lambda * MSE`` with
+    the reconstruction and the MSE on the ``[0, 255]`` scale.
+  * ``"pm1"`` (Duan et al. 2023's convention): ``KL_nats / (3*H*W) + lambda * MSE``
+    with the reconstruction and the MSE on ``[-1, 1]``, so lambda means the same
+    as for :mod:`~rdsandwich.models.upper_bound.variable_rate_lossy_vae`. The image head
+    emits ``[-1, 1]`` directly instead of ``(conv + 0.5) * 255``. With
+    ``lambda_pm1 = lambda_0_255 * 255^2 / (4 * 3 * log2(e))`` (~3756x) both reach
+    the same optimum; the loss is ``1 / (3 * log2(e))`` (~0.231) times smaller.
+
+The encoder input is ``x / 255 - 0.5`` in both cases. Either way ``forward``
+takes ``x`` in ``[0, 255]`` and returns ``x_hat`` in ``[0, 255]``, per-image
+``bits`` and metrics; ``get_losses`` returns ``(loss, rate=bpp, mse)`` with
+``mse`` on the ``[0, 255]`` scale.
 """
 from __future__ import annotations
 
@@ -42,26 +52,22 @@ import torch.nn.functional as F
 from rdsandwich.layers.deep_factorized import DeepFactorized
 from rdsandwich.layers.channelwise_ar import ChannelwiseARTransform
 from rdsandwich.layers.gdn import GDN
-from rdsandwich.models.upper_bound._common import LN2, gaussian_kl, normal_log_prob, softplus_scale
+from rdsandwich.models.upper_bound._common import (
+    LN2,
+    MSE_PM1_TO_255,
+    gaussian_kl,
+    normal_log_prob,
+    softplus_scale,
+)
+from rdsandwich.models.upper_bound._common import tensor_stats as _tstats
 
 LOGIT_OFFSET = 1.0
+IMAGE_RANGES = ("0_255", "pm1")
 
 
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
-def _tstats(x: torch.Tensor) -> dict:
-    """min/max/absmax/non-finite count of a tensor, as plain floats (diagnostics only)."""
-    x = x.detach().float()
-    finite = x[torch.isfinite(x)]
-    return dict(
-        min=finite.min().item() if finite.numel() else float("nan"),
-        max=finite.max().item() if finite.numel() else float("nan"),
-        absmax=finite.abs().max().item() if finite.numel() else float("nan"),
-        nonfinite=int(x.numel() - finite.numel()),
-    )
-
-
 def enc_conv(in_ch, out_ch, k=3, stride=1, activation=None):
     """Strided (down) convolution; ``activation`` is an nn.Module or None."""
     conv = nn.Conv2d(in_ch, out_ch, k, stride=stride, padding=k // 2)
@@ -100,9 +106,13 @@ class EncoderBlock(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, in_ch, filters, k=3, stride=2, img_output=False):
+    """``img_output`` blocks emit the reconstruction: on [0, 255] for
+    ``image_range="0_255"``, on [-1, 1] for ``"pm1"``."""
+
+    def __init__(self, in_ch, filters, k=3, stride=2, img_output=False, image_range="0_255"):
         super().__init__()
         self.img_output = img_output
+        self.image_range = image_range
         if not img_output:
             self.conv1 = dec_conv(in_ch, filters, k, stride, activation=nn.LeakyReLU(0.2))
             self.conv2 = dec_conv(filters, filters, k, 1, activation=nn.LeakyReLU(0.2))
@@ -116,6 +126,8 @@ class DecoderBlock(nn.Module):
 
     def forward(self, x):
         if self.img_output:
+            if self.image_range == "pm1":
+                return self.conv(x)
             return (self.conv(x) + 0.5) * 255.0
         return self.shortcut(x) + self.conv2(self.conv1(x))
 
@@ -206,11 +218,16 @@ class ResNetVAEConfig:
     df_filters: List[int] = field(default_factory=lambda: [3, 3, 3])  # DeepFactorized layer widths
     # Floor on every Gaussian (q/p) scale, for numerical stability at high lambda.
     scale_min: float = 1e-5
+    # Scale of the reconstruction and the MSE in the loss (see the module docstring);
+    # also sets what lambda means.
+    image_range: str = "0_255"
 
 
 class ResNetVAE(nn.Module):
     def __init__(self, cfg: ResNetVAEConfig):
         super().__init__()
+        if cfg.image_range not in IMAGE_RANGES:
+            raise ValueError(f"image_range must be one of {IMAGE_RANGES}, got {cfg.image_range!r}")
         self.cfg = cfg
         self.num_levels = num_levels = len(cfg.latent_channels)
         self.z0_channels = z0_channels = cfg.latent_channels[-1]
@@ -235,7 +252,8 @@ class ResNetVAE(nn.Module):
         for i in range(num_levels):
             dec_in = z0_channels if i == 0 else nf
             if i == num_levels - 1:
-                self.decoders.append(DecoderBlock(dec_in, cfg.in_channels, stride=stride, img_output=True))
+                self.decoders.append(DecoderBlock(dec_in, cfg.in_channels, stride=stride, img_output=True,
+                                                  image_range=cfg.image_range))
             else:
                 self.decoders.append(DecoderBlock(dec_in, nf, stride=stride, img_output=False))
 
@@ -297,14 +315,22 @@ class ResNetVAE(nn.Module):
                 stats[f"level{i}"] = level_stats
             t = self.decoders[i](t)
 
-        x_hat = t
         bits = torch.stack(bits_per_level, dim=0).sum(dim=0)  # [B]
-
-        mses = ((x - x_hat) ** 2).flatten(1).mean(-1)         # per image, in [0,255]^2 units
-        mse = mses.mean()
         num_pixels = x.shape[0] * x.shape[-2] * x.shape[-1]
         bpp = bits.sum() / num_pixels
-        loss = bpp + self.cfg.lmbda * mse
+
+        if self.cfg.image_range == "pm1":
+            x_hat_pm1 = t
+            mses_pm1 = ((x_hat_pm1 - (x / 127.5 - 1.0)) ** 2).flatten(1).mean(-1)
+            rate = bits * LN2 / x[0].numel()                  # nats per sub-pixel, per image
+            loss = (rate + self.cfg.lmbda * mses_pm1).mean()
+            mses = mses_pm1 * MSE_PM1_TO_255
+            x_hat = (x_hat_pm1 + 1.0) * 127.5
+        else:
+            x_hat = t
+            mses = ((x - x_hat) ** 2).flatten(1).mean(-1)     # per image, in [0,255]^2 units
+            loss = bpp + self.cfg.lmbda * mses.mean()
+        mse = mses.mean()
         # PSNR (dB) per image, at 8-bit peak, for logging/eval.
         psnr = (20 * math.log10(255.0) - 10.0 * torch.log10(mses.clamp_min(1e-12))).mean()
         out = dict(loss=loss, bpp=bpp, mse=mse, mses=mses, bits=bits, x_hat=x_hat, psnr=psnr)

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SMOKE TEST: the FULL n=1000 Gaussian R-D upper-bound sweep, cut to 2 epochs.
 #
-# Same source, models and settings as the real sweep (configs/gaussian_ub.yaml and
-# configs/gaussian_ub_zy.yaml): the paper's fixed n=1000 Gaussian, the MLP beta-VAE with a
+# Same source, models and settings as the real sweep (configs/gaussian/mlp_vae_train_ub.yaml and
+# configs/gaussian/mlp_vae_train_ub_zy.yaml): the paper's fixed n=1000 Gaussian, the MLP beta-VAE with a
 # decoder at latent_dim 400/600/800 plus the Z == Y (no decoder) model, 7 lambdas,
 # batch 64, lr 5e-4, 1000 steps per epoch. Only --epochs differs (2 instead of 80).
 # For every run: train_ub -> eval_ub (sampled (D, R) +/- 95% CI) -> then plot_rdub.

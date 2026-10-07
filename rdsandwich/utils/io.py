@@ -133,12 +133,22 @@ def save_checkpoint(path: str, model: torch.nn.Module, optimizer=None, extra: Op
     return path
 
 
-def load_checkpoint(path: str, model: torch.nn.Module, optimizer=None, map_location=None) -> dict:
+def load_checkpoint(path: str, model: torch.nn.Module, optimizer=None, map_location=None,
+                    use_ema: bool = False) -> dict:
+    """Load weights (and optimizer state) from ``path``; returns the ``extra`` payload.
+
+    ``use_ema=True`` loads the exponential-moving-average weights instead of the raw
+    ones when the checkpoint has them (``extra["ema_state_dict"]``), as for evaluation.
+    """
     state = torch.load(path, map_location=map_location)
-    model.load_state_dict(state["model_state_dict"])
+    extra = state.get("extra", {})
+    if use_ema and "ema_state_dict" in extra:
+        model.load_state_dict(extra["ema_state_dict"])
+    else:
+        model.load_state_dict(state["model_state_dict"])
     if optimizer is not None and "optimizer_state_dict" in state:
         optimizer.load_state_dict(state["optimizer_state_dict"])
-    return state.get("extra", {})
+    return extra
 
 
 def latest_checkpoint(dir_path: str, suffix: str = ".pt") -> Optional[str]:

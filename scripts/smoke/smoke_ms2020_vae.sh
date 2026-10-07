@@ -2,7 +2,7 @@
 # SMOKE TEST: the FULL natural-image Minnen & Singh 2020 beta-VAE pipeline, cut to 2 epochs.
 #
 # Same model, data and optimization settings as the real run
-# (configs/natural_images_ms2020_vae_train.yaml): full-size MS2020-VAE (latent_depth 320,
+# (configs/images/ms2020_vae_train_ub.yaml): full-size MS2020-VAE (latent_depth 320,
 # hyperprior_depth 192, 192 filters, 10 slices), the whole COCO training set, 256x256
 # patches, batch 16, all 6 lambdas, torch.compile + AMP. Only --epochs differs (2 instead
 # of 2000). For every lambda: train_ub -> eval_ub on Kodak (and Tecnick, if present)
@@ -53,7 +53,7 @@ for lamb in $LAMBDAS; do
 done
 
 for data in "${evalsets[@]}"; do
-  ds=$(python -c "from rdsandwich.data import dataset_name; print(dataset_name('$data'))")
+  ds=$(python -c "from rdsandwich.data.datasets import dataset_name; print(dataset_name('$data'))")
   run python evaluation/plot_qr.py --models ms2020_vae --dataset "$ds" --results_dir $RES --out $RES/qr_$ds.png
   run python evaluation/plot_qr.py --models ms2020_vae --dataset "$ds" --results_dir $RES --out $RES/rd_$ds.png --rd
 done

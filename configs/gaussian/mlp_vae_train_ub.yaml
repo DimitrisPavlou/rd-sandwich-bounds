@@ -8,26 +8,31 @@
 #     --lambda {2} --rpd train --epochs 80 --steps_per_epoch 1000 --lr 5e-4 --batchsize 64 \
 #     ::: 400 500 600 800 ::: 0.3 1 3 10 30 100 300
 #
-# Run it with:  python scripts/run_sweep.py --config configs/gaussian_ub.yaml
+# Run it with:  python scripts/run_sweep.py --config configs/gaussian/mlp_vae_train_ub.yaml
 # (add --dry-run to preview the 4 x 7 = 28 commands, or -j N to run N at a time)
 
 script: train_ub
 
 # Flags identical across every run.
 fixed:
-  model: mlp_vae
+  # ===== 1. data =============================================================
   dataset: gaussian
   # Path to the fixed random Gaussian source. This is the file shipped in the repo;
   # regenerate with:  python scripts/gen_gaussian_params.py --save_dir data/gaussian --dim 1000
   gparams_path: data/gaussian/gaussian_params-dim=1000.npz
   data_dim: 1000
-  checkpoint_dir: checkpoints/gaussian
+
+  # ===== 2. model ============================================================
+  model: mlp_vae
   prior_type: gmm_1
   posterior_type: gaussian
   encoder_activation: none
   decoder_activation: leaky_relu
   decoder_units: 1000        # decoder present (Z != Y), mapping Z -> Y
   rpd: true                  # report rate per dimension
+
+  # ===== 3. training =========================================================
+  checkpoint_dir: checkpoints/gaussian
   epochs: 80
   steps_per_epoch: 1000
   lr: 5.0e-4                 # note: write 5.0e-4, not 5e-4 (YAML parses 5e-4 as a string)

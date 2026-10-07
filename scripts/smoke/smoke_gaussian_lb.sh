@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SMOKE TEST: the FULL Gaussian R-D lower-bound sweep, with a short training budget.
 #
-# Same sources, model and settings as the real sweep (configs/gaussian_lb.yaml):
+# Same sources, model and settings as the real sweep (configs/gaussian/mlp_train_eval_lb.yaml):
 # standard Gaussians of dimension 2/4/8/16, 7 lambdas, a log-u MLP auto-sized to
 # 2 x 20n SeLU units (paper A.5.2), k=1024, M=2 with the quick inner optimizer for
 # training, then the exhaustive optimizer with M=5 for the reported estimate.

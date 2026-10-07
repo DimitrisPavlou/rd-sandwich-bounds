@@ -9,7 +9,7 @@ upper-bound sweep::
 
 becomes::
 
-    python scripts/run_sweep.py --config configs/gaussian_ub.yaml
+    python scripts/run_sweep.py --config configs/gaussian/mlp_vae_train_ub.yaml
 
 Each combination is expanded from the config's ``sweep`` block (see
 ``rdsandwich.sweep``) and launched as its own process, the same "one
@@ -17,7 +17,9 @@ hyperparameter combo per process" isolation as ``parallel``. When ``script`` is
 a list (e.g. ``[train_lb, eval_lb]``), its scripts run in order for each
 combination, stopping at the first failure. Use ``--jobs N`` to run up to N
 combinations concurrently, and ``--dry-run`` to print the commands instead (they
-can be pasted into a bash script or a Slurm array).
+can be pasted into a bash script or a Slurm array). ``--index N`` runs only the
+N-th combination (0-based, in ``--dry-run`` order), so a Slurm array task can run
+``--index $SLURM_ARRAY_TASK_ID`` straight from the YAML.
 """
 import argparse
 import os
@@ -50,16 +52,31 @@ def build_commands(config, config_path):
     ]
 
 
+def select_runs(runs, index):
+    """All runs, or only the ``index``-th one (0-based) when ``index`` is given."""
+    if index is None:
+        return runs
+    if not 0 <= index < len(runs):
+        raise SystemExit(f"--index {index} is out of range: the config expands to {len(runs)} run(s) "
+                         f"(valid: 0..{len(runs) - 1})")
+    return [runs[index]]
+
+
 def main():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--config", required=True, help="Path to a YAML experiment config.")
     p.add_argument("--jobs", "-j", type=int, default=1, help="Number of runs to execute concurrently.")
     p.add_argument("--dry-run", action="store_true", help="Print the commands instead of running them.")
+    p.add_argument("--index", type=int, default=None,
+                   help="Run only the N-th expanded run (0-based), e.g. a Slurm array task id.")
     args = p.parse_args()
 
     config = load_config(args.config)
     runs = build_commands(config, args.config)
     print(f"{len(runs)} run(s) expanded from {args.config} (script={config['script']})")
+    runs = select_runs(runs, args.index)
+    if args.index is not None:
+        print(f"--index {args.index}: running only that one")
 
     if args.dry_run:
         for cmds in runs:

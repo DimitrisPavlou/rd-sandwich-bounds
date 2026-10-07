@@ -4,8 +4,8 @@ The only thing asked of the model is ``get_losses(x) -> (loss, rate,
 distortion)``; ``train_step`` returns that Lagrangian, and the rest of the
 loop (batching, optimizer/scheduler step, logging, checkpointing) comes from
 ``BaseTrainer``. Optional speed-ups (``torch.compile``, channels_last) are
-trainer options, so they apply to every model. Also provides the
-piecewise-constant LR schedule used for the vector-data experiments.
+trainer options, so they apply to every model. The LR schedules live in
+``rdsandwich.utils.lr_schedulers``.
 """
 from __future__ import annotations
 
@@ -15,24 +15,6 @@ import torch
 import torch._dynamo  # noqa: F401 (for torch._dynamo.config, used to raise the recompile limit)
 
 from rdsandwich.utils.trainer import BaseTrainer
-
-
-def lr_lambda_schedule(epoch: int, epochs: int, decay_factor: float = 0.2) -> float:
-    """Piecewise-constant decay matching rdub_mlp.get_lr_scheduler."""
-    if epoch < 0.5 * epochs:
-        return 1.0
-    if epoch < 0.75 * epochs:
-        return decay_factor
-    if epoch < 0.875 * epochs:
-        return decay_factor ** 2
-    return decay_factor ** 3
-
-
-def make_lr_scheduler(optimizer: torch.optim.Optimizer, epochs: int):
-    """LambdaLR implementing ``lr_lambda_schedule`` over ``epochs`` epochs."""
-    return torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lr_lambda=lambda e: lr_lambda_schedule(e, epochs)
-    )
 
 
 class UpperBoundTrainer(BaseTrainer):

@@ -7,7 +7,7 @@ Every model is trained by the same ``UpperBoundTrainer``, which only calls
 (.npy/.npz array or image folder). See ``rdsandwich/cli/upper_bound.py`` for
 how to add a model. Evaluate afterwards with ``evaluation/eval_ub.py``.
 
-Gaussian, n=1000, one (latent_dim, lambda) combo (sweep: configs/gaussian_ub.yaml):
+Gaussian, n=1000, one (latent_dim, lambda) combo (sweep: configs/gaussian/mlp_vae_train_ub.yaml):
 
     python train/train_ub.py --model mlp_vae \
         --dataset gaussian --gparams_path data/gaussian/gaussian_params-dim=1000.npz \
@@ -15,7 +15,7 @@ Gaussian, n=1000, one (latent_dim, lambda) combo (sweep: configs/gaussian_ub.yam
         --checkpoint_dir checkpoints/gaussian \
         --epochs 80 --steps_per_epoch 1000 --lr 5.0e-4 --batchsize 64
 
-Natural images, one lambda (sweep: configs/natural_images_resnet_vae_train.yaml):
+Natural images, one lambda (sweep: configs/images/resnet_vae_train_ub.yaml):
 
     python train/train_ub.py --model resnet_vae \
         --dataset data/my_coco_train2017 --patchsize 256 \
@@ -28,17 +28,29 @@ import os
 import torch
 
 from rdsandwich.cli.common import is_image_dataset, load_dataset
-from rdsandwich.cli.upper_bound import build_model, build_train_parser, finalize_args, get_runname
+from rdsandwich.cli.upper_bound import (
+    build_model,
+    build_train_parser,
+    checkpoint_filename,
+    finalize_args,
+    get_runname,
+)
 from rdsandwich.data.base import build_loader
-from rdsandwich.upper_bound.trainer import UpperBoundTrainer, make_lr_scheduler
+from rdsandwich.upper_bound.trainer import UpperBoundTrainer
 from rdsandwich.utils.io import JsonlLogger, get_time_str
-from rdsandwich.utils.trainer import WarmupReduceLROnPlateau
+from rdsandwich.utils.lr_schedulers import (
+    WarmupReduceLROnPlateau,
+    make_const_cos_scheduler,
+    make_lr_scheduler,
+)
 from rdsandwich.utils.torch_utils import get_device, seed_everything
 
 
 def make_scheduler(args, optimizer):
     if args.lr_schedule == "piecewise":
         return make_lr_scheduler(optimizer, args.epochs)
+    if args.lr_schedule == "const-cos":
+        return make_const_cos_scheduler(optimizer, args.epochs)
     if args.lr_schedule == "plateau":
         return WarmupReduceLROnPlateau(
             optimizer, factor=0.5, patience=args.patience, warmup=args.warmup, min_lr=1e-6,
@@ -71,12 +83,13 @@ def main():
     loader = build_loader(dataset, args.batchsize, num_workers=num_workers,
                           pin_memory=image_data and device.type == "cuda")
     if hasattr(dataset, "__len__"):
-        print(f"{len(dataset)} examples -> {len(loader)} steps/epoch (batch {args.batchsize})")
+        print(f"{len(dataset)} examples -> {len(loader)} steps/epoch (batch {args.batchsize}) "
+              f"-> {len(loader) * args.epochs} steps in {args.epochs} epochs")
 
     save_dir = os.path.join(args.checkpoint_dir, get_runname(args))
     os.makedirs(save_dir, exist_ok=True)
     log_path = os.path.join(save_dir, f"record-{get_time_str()}.jsonl")
-    ckpt_path = os.path.join(save_dir, f"ckpt-lambda={args.lmbda:g}.pt")
+    ckpt_path = os.path.join(save_dir, checkpoint_filename(args))
     print(f"Logging to {log_path}\nCheckpoints -> {save_dir}")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -87,6 +100,7 @@ def main():
         ckpt_path=ckpt_path, verbose=args.verbose, grad_clip=args.grad_clip, amp=args.amp,
         max_nonfinite_skips=args.skip_nonfinite, checkpoint_interval=args.checkpoint_interval,
         resume=args.resume, compile=args.compile, channels_last=args.channels_last,
+        ema_decay=args.ema, ema_warmup=args.ema_warmup,
         checkpoint_metadata={"model": args.model},
     )
     trainer.train()

@@ -12,7 +12,7 @@ folder). Training only writes checkpoints; estimate R_L(D) afterwards with
         --y_init quick --y_quick_topn 10 --lr 5.0e-4 -V
 
 Train + evaluate a whole sweep from one config:
-    python scripts/run_sweep.py --config configs/gaussian_lb.yaml
+    python scripts/run_sweep.py --config configs/gaussian/mlp_train_eval_lb.yaml
 """
 import os
 

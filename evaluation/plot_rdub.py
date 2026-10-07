@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Aggregate an R-D upper-bound sweep and plot the sandwich figure.
 
-After running e.g. ``scripts/run_sweep.py --config configs/gaussian_ub.yaml``,
+After running e.g. ``scripts/run_sweep.py --config configs/gaussian/mlp_vae_train_ub.yaml``,
 each run leaves a folder under ``--checkpoint_dir`` containing a per-epoch
 ``record-*.jsonl`` log and a ``ckpt-*.pt`` checkpoint. This script:
 
