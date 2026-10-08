@@ -41,7 +41,6 @@ echo "host=$(hostname)  job=$SLURM_JOB_ID"
 echo "=== Python ==="
 which python && python --version
 echo "=== PyTorch / CUDA ==="
-python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA version:', torch.version.cuda); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
 
 # --- launch -------------------------------------------------------------------
 args=(
@@ -70,6 +69,7 @@ args=(
   --resume
   --amp                               # mixed precision (Duan: fp32); same for both models
   --verbose
+  --compile
 )
 
 python train/train_ub.py "${args[@]}"
