@@ -1,30 +1,28 @@
 #!/bin/bash
-# --- VUB-HPC (Hydra) GPU job — natural-images ResNet-VAE R-D UPPER BOUND ------
-# Yang & Mandt's ResNet-VAE (num_filters 256, 15.7M params) on raw COCO, trained with
-# the SAME recipe, budget and schedule as train_ub_variable_rate_lossy_vae.sbatch, so
-# the two R-D curves differ only because of the model. Shared recipe of
-# configs/images/resnet_vae_train_ub_pm1.yaml, except for --amp and --grad_clip.
+# --- VUB-HPC (Hydra) GPU job -- variable-rate lossy VAE R-D UPPER BOUND ---------
+# Duan et al. (ICIP 2023) variable-rate ResNet-VAE, preset c32_l15 (C=32, 15 latents,
+# 18.6M params: about the ResNet-VAE's 15.7M). Shared recipe of
+# configs/images/variable_rate_lossy_vae_train_ub.yaml (Duan's), except for the preset,
+# --amp and --grad_clip. Same budget and schedule as train_ub_resnet_vae.sbatch.
 #
-# Each array task runs ONE lambda on ONE GPU (training is single-GPU, no DDP).
-# Lambdas are Duan's (pm1 units: KL nats/dim + lambda * MSE on [-1, 1]), so they
-# are on the same scale as the variable-rate model's [4, 2048].
+# ONE run covers every lambda in [4, 2048] (sampled log-uniformly per image), so
+# this is a single job, not an array.
 #
-# Submit:  sbatch scripts/slurm/train_ub_resnet_vae.sbatch
-# Chain:   sbatch --dependency=afterany:<ARRAY_JOBID> scripts/slurm/train_ub_resnet_vae.sbatch
+# Submit:  sbatch scripts/slurm/train_ub_variable_rate_lossy_vae.sbatch
+# Chain:   sbatch --dependency=afterany:<JOBID> scripts/slurm/train_ub_variable_rate_lossy_vae.sbatch
 # Watch:   mysqueue
 #
-# 300 epochs = 1,108,800 steps per lambda; --checkpoint_interval + --resume let 48 h jobs chain.
+# 300 epochs = 1,108,800 steps; --checkpoint_interval + --resume let 48 h jobs chain.
 # Requires raw COCO train2017 at the --dataset path below.
 
-#SBATCH --job-name=rdub_resnetvae
+#SBATCH --job-name=rdub_vr_lossy_vae
 #SBATCH --partition=hopper_gpu      # Nvidia H100 (test/debug: ampere_gpu A100, or -M anansi -p ada_gpu)
-#SBATCH --array=0-5%2               # all 6 lambdas, at most 2 running at once
-#SBATCH --gres=gpu:1                # 1 GPU per task
+#SBATCH --gres=gpu:1                # 1 GPU (training is single-GPU, no DDP)
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16          # >= num_workers (16)
 #SBATCH --time=48:00:00             # resubmit to continue (--resume)
-#SBATCH --output=logs/%x_%A_%a.out  # %x=job-name %A=array-job-id %a=array-task-id
-#SBATCH --error=logs/%x_%A_%a.err
+#SBATCH --output=logs/%x_%j.out     # %x=job-name %j=job-id
+#SBATCH --error=logs/%x_%j.err
 
 set -euo pipefail
 
@@ -37,13 +35,9 @@ cd "$VSC_SCRATCH/rd-sandwich-bounds"     # repo root, where train/ and data/ liv
 export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"  # import rdsandwich without `pip install -e .`
 mkdir -p logs
 
-# --- lambda sweep (pm1 units, matches resnet_vae_train_ub_pm1.yaml) -----------
-LAMBDAS=(8 22.6 64 181 512 1448)    # must cover every index in --array above
-LAMBDA="${LAMBDAS[$SLURM_ARRAY_TASK_ID]}"
-
 # --- sanity checks -----------------------------------------------------------
-echo "=== host/task ==="
-echo "host=$(hostname)  task=$SLURM_ARRAY_TASK_ID  lambda=$LAMBDA"
+echo "=== host/job ==="
+echo "host=$(hostname)  job=$SLURM_JOB_ID"
 echo "=== Python ==="
 which python && python --version
 echo "=== PyTorch / CUDA ==="
@@ -59,27 +53,22 @@ args=(
   --num_workers 16                    # full COCO is decoded on the fly (too big to preload)
 
   # ===== 2. model ============================================================
-  --model resnet_vae
-  --image_range pm1                   # Duan's loss form and lambda units
-  --latent_channels 4,8,16,32,64,128
-  --ar_prior_levels 4
-  --ar_slices 8
-  --num_filters 256
-  --lambda "$LAMBDA"
+  --model variable_rate_lossy_vae
+  --preset c32_l15                    # C=32, latents 1,2,3,4,5 (18.6M params; not in the paper)
+  --lmb_range 4.0,2048.0              # training lambda range (log-uniform)
 
   # ===== 3. training =========================================================
-  --checkpoint_dir checkpoints/resnet_vae_full_coco
+  --checkpoint_dir checkpoints/lvae_variable_rate_full_coco
   --batchsize 32
   --epochs 300                        # 3,696 steps/epoch -> 1,108,800 steps
   --lr 2.0e-4
   --lr_schedule const-cos             # constant for 150 epochs, then cosine to 0.01x
-  --grad_clip 500.0                   # spike guard, as the lossy VAE; check clip_frac in epoch 0
+  --grad_clip 500.0                   # spike guard only: probe grad norms 50-280 over 800 steps (Duan: 2.0)
   --ema 0.9999                        # evaluated by default
   --ema_warmup 10000
-  --checkpoint_interval 1             # resumable every epoch
+  --checkpoint_interval 10            # resumable every 10 epochs
   --resume
-  --amp                               # mixed precision; same for both models
-  --compile                           # speed only
+  --amp                               # mixed precision (Duan: fp32); same for both models
   --verbose
 )
 
