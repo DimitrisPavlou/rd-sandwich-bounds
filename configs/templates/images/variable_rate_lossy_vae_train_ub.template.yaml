@@ -73,9 +73,9 @@ fixed:
   channels_last: false          # (bool, false)  channels_last memory format.
   # --- run / bookkeeping ---
   checkpoint_dir: checkpoints/templates   # (str, ./checkpoints)  writes <checkpoint_dir>/<run name>/.
-  checkpoint_interval: 1        # (int, null)  also save every N epochs (what --resume restarts from);
-                                #   null = only at the end.
-  resume: true                  # (bool, false)  continue from the newest checkpoint in the run directory.
+  checkpoint_interval: 1        # (int, null)  also save every N epochs, each to its own
+                                #   <ckpt>-epoch=NNNN.pt; null = only the final <ckpt>.pt.
+  resume: true                  # (bool, false)  continue from the run's highest-epoch checkpoint.
   seed: 0                       # (int, 0)  random seed.
   # device: cuda                # (str, null)  e.g. cuda, cuda:1, cpu; null = cuda if available.
   verbose: true                 # (bool, false)  print per-epoch metrics.

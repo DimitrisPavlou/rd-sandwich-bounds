@@ -52,13 +52,72 @@ def test_periodic_checkpoint_and_resume(tmp_path):
     tr = _Trainer(m, loader, optimizer=opt, epochs=4, steps_per_epoch=2,
                   ckpt_path=ckpt, checkpoint_interval=2, verbose=False)
     tr.train()
-    assert os.path.exists(ckpt)
+    # One file per periodic save, plus the final checkpoint.
+    assert sorted(os.listdir(tmp_path)) == ["ckpt-epoch=0002.pt", "ckpt-epoch=0004.pt", "ckpt.pt"]
+    e2 = torch.load(os.path.join(tmp_path, "ckpt-epoch=0002.pt"), weights_only=False)
+    assert e2["extra"]["epoch"] == 1 and len(e2["extra"]["history"]["loss"]) == 2
 
     m2 = nn.Linear(4, 4)
     loader2, opt2 = _make(m2)
     tr2 = _Trainer(m2, loader2, optimizer=opt2, epochs=6, steps_per_epoch=2,
                    ckpt_path=ckpt, resume=True, verbose=False)
     assert tr2.start_epoch == 4
+    assert torch.equal(m2.weight, m.weight)
+    hist = tr2.train()
+    assert len(hist["loss"]) == 6                       # history carried across the resume
+    assert torch.load(ckpt, weights_only=False)["extra"]["epoch"] == 5
+
+
+def _ckpt_trainer(tmp_path, epochs, **kw):
+    m = nn.Linear(4, 4)
+    loader, opt = _make(m)
+    return _Trainer(m, loader, optimizer=opt, epochs=epochs, steps_per_epoch=2,
+                    ckpt_path=os.path.join(tmp_path, "ckpt-lambda=64.pt"), verbose=False, **kw)
+
+
+def test_resume_picks_highest_epoch_not_newest_file(tmp_path):
+    _ckpt_trainer(tmp_path, 3, checkpoint_interval=1).train()     # epoch 1..3 + final (epoch 3)
+    # Then a longer run is resumed and killed after its epoch-5 save: the final file is
+    # from epoch 3, and we make it the most recently modified file.
+    tr = _ckpt_trainer(tmp_path, 5, checkpoint_interval=1, resume=True)
+    for epoch in (3, 4):
+        tr._save(epoch, {}, os.path.join(tmp_path, f"ckpt-lambda=64-epoch={epoch + 1:04d}.pt"))
+    os.utime(os.path.join(tmp_path, "ckpt-lambda=64.pt"))
+    # Other runs' files and explosion dumps in the same directory are not candidates.
+    tr._save(98, {}, os.path.join(tmp_path, "ckpt-lambda=6-epoch=0099.pt"))
+    tr._save(98, {}, os.path.join(tmp_path, "ckpt-lambda=64-epoch=0099.pt.tmp"))
+    tr._save(98, {}, os.path.join(tmp_path, "explosion-e98-s0-2026.pt"))
+    assert _ckpt_trainer(tmp_path, 10, resume=True).start_epoch == 5
+
+
+def test_resume_falls_back_past_a_corrupt_checkpoint(tmp_path):
+    _ckpt_trainer(tmp_path, 4, checkpoint_interval=2).train()
+    os.remove(os.path.join(tmp_path, "ckpt-lambda=64.pt"))
+    (tmp_path / "ckpt-lambda=64-epoch=0004.pt").write_bytes(b"truncated")
+    assert _ckpt_trainer(tmp_path, 6, resume=True).start_epoch == 2
+    (tmp_path / "ckpt-lambda=64-epoch=0002.pt").write_bytes(b"truncated")
+    with pytest.raises(RuntimeError, match="none of the checkpoints"):
+        _ckpt_trainer(tmp_path, 6, resume=True)
+
+
+def test_resume_without_checkpoints_starts_fresh(tmp_path):
+    assert _ckpt_trainer(tmp_path, 2, resume=True).start_epoch == 0
+
+
+def test_every_periodic_checkpoint_is_kept(tmp_path):
+    _ckpt_trainer(tmp_path, 6, checkpoint_interval=2).train()
+    tr = _ckpt_trainer(tmp_path, 10, checkpoint_interval=2, resume=True)
+    tr.train()
+    assert sorted(os.listdir(tmp_path)) == [f"ckpt-lambda=64-epoch={n:04d}.pt" for n in (2, 4, 6, 8, 10)] \
+        + ["ckpt-lambda=64.pt"]
+
+
+def test_resume_past_epochs_keeps_the_loaded_epoch(tmp_path):
+    _ckpt_trainer(tmp_path, 4, checkpoint_interval=2).train()
+    tr = _ckpt_trainer(tmp_path, 2, resume=True)               # asks for fewer epochs than done
+    tr.train()                                                 # runs nothing
+    final = torch.load(os.path.join(tmp_path, "ckpt-lambda=64.pt"), weights_only=False)
+    assert final["extra"]["epoch"] == 3
 
 
 def test_plateau_scheduler_respects_warmup():
@@ -146,3 +205,11 @@ def test_latest_checkpoint_skips_explosion_dumps(tmp_path):
     time.sleep(0.01)
     (tmp_path / "explosion-e3-s7-2026.pt").write_bytes(b"x")  # newer, but not a checkpoint
     assert latest_checkpoint(str(tmp_path)).endswith("ckpt-lambda=0.01.pt")
+
+
+def test_save_checkpoint_is_atomic(tmp_path):
+    from rdsandwich.utils.io import save_checkpoint
+
+    path = str(tmp_path / "ckpt.pt")
+    save_checkpoint(path, nn.Linear(2, 2))
+    assert os.listdir(tmp_path) == ["ckpt.pt"]                 # no .tmp left behind

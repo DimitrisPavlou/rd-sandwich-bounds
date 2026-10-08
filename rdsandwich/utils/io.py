@@ -4,7 +4,8 @@ from __future__ import annotations
 import datetime
 import json
 import os
-from typing import Any, Dict, Iterable, Optional
+import re
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -123,13 +124,17 @@ def parse_lamb(path: str, strip_pardir: bool = True) -> str:
 # Checkpointing
 # --------------------------------------------------------------------------- #
 def save_checkpoint(path: str, model: torch.nn.Module, optimizer=None, extra: Optional[dict] = None) -> str:
+    """Save atomically: write ``<path>.tmp`` and rename it over ``path``, so a job
+    killed mid-save never leaves a truncated checkpoint behind."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     state = {"model_state_dict": model.state_dict()}
     if optimizer is not None:
         state["optimizer_state_dict"] = optimizer.state_dict()
     if extra:
         state["extra"] = extra
-    torch.save(state, path)
+    tmp = path + ".tmp"
+    torch.save(state, tmp)
+    os.replace(tmp, path)
     return path
 
 
@@ -166,3 +171,45 @@ def latest_checkpoint(dir_path: str, suffix: str = ".pt") -> Optional[str]:
     if not candidates:
         return None
     return max(candidates, key=os.path.getmtime)
+
+
+# Periodic checkpoints sit next to the final one (``ckpt-lambda=64.pt``) as
+# ``ckpt-lambda=64-epoch=0042.pt``, where the number counts completed epochs.
+def epoch_checkpoint_path(path: str, epochs_done: int) -> str:
+    """``<dir>/<stem>.pt`` -> ``<dir>/<stem>-epoch=NNNN.pt`` (``epochs_done`` = NNNN)."""
+    stem, ext = os.path.splitext(path)
+    return f"{stem}-epoch={epochs_done:04d}{ext}"
+
+
+def epoch_checkpoints(path: str) -> List[Tuple[int, str]]:
+    """The periodic checkpoints of the run whose final checkpoint is ``path``, as
+    ``(epochs_done, file)`` sorted by epoch. Other files in the directory (other
+    lambdas, explosion dumps, ``.tmp`` leftovers) are ignored."""
+    dir_path = os.path.dirname(path) or "."
+    if not os.path.isdir(dir_path):
+        return []
+    stem, ext = os.path.splitext(os.path.basename(path))
+    pattern = re.compile(re.escape(stem) + r"-epoch=(\d+)" + re.escape(ext))
+    found = []
+    for f in os.listdir(dir_path):
+        m = pattern.fullmatch(f)
+        if m:
+            found.append((int(m.group(1)), os.path.join(dir_path, f)))
+    return sorted(found)
+
+
+def resume_candidates(path: str) -> List[Tuple[int, str]]:
+    """Checkpoints of the run whose final checkpoint is ``path``, most-trained first,
+    as ``(epochs_done, file)``. Ordered by epoch rather than modification time: a final
+    checkpoint from an earlier, shorter run can be older than a newer periodic one.
+    The final file has no epoch in its name, so it is read (memory-mapped, without
+    loading the weights) from its ``extra["epoch"]``; on a tie it comes first."""
+    candidates = [(n, 0, p) for n, p in epoch_checkpoints(path)]
+    if os.path.isfile(path):
+        try:
+            state = torch.load(path, map_location="cpu", mmap=True)
+            candidates.append((int(state.get("extra", {}).get("epoch", -1)) + 1, 1, path))
+        except Exception as e:  # noqa: BLE001 - an unreadable file is just not a candidate
+            print(f"Warning: cannot read {path} ({e!r}); not resuming from it.")
+    return [(n, p) for n, _, p in sorted(candidates, reverse=True)]
+

@@ -245,9 +245,11 @@ def build_train_parser() -> argparse.ArgumentParser:
                         "the first steps compile).")
     g.add_argument("--channels_last", action="store_true", help="channels_last memory format.")
     g.add_argument("--checkpoint_interval", type=int, default=None,
-                   help="Also save a checkpoint every N epochs (default: only at the end).")
+                   help="Also save a checkpoint every N epochs, each to its own "
+                        "<ckpt>-epoch=NNNN.pt file (default: only the final <ckpt>.pt).")
     g.add_argument("--resume", action="store_true",
-                   help="Resume from the newest checkpoint in the run directory.")
+                   help="Resume from this run's most-trained checkpoint (highest epoch among "
+                        "the periodic and final ones).")
     return p
 
 

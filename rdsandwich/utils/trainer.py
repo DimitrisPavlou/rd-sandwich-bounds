@@ -23,7 +23,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import IterableDataset
 from tqdm import tqdm
 
-from rdsandwich.utils.io import JsonlLogger, MyJSONEncoder, get_time_str, latest_checkpoint, load_checkpoint, save_checkpoint
+from rdsandwich.utils.io import (JsonlLogger, MyJSONEncoder, epoch_checkpoint_path, get_time_str, load_checkpoint,
+                                 resume_candidates, save_checkpoint)
 from rdsandwich.utils.lr_schedulers import WarmupReduceLROnPlateau
 
 
@@ -81,6 +82,8 @@ class BaseTrainer:
         self.start_epoch = 0
         # Optimizer steps taken so far, across epochs and resumes (drives the EMA warmup).
         self.global_step = 0
+        # Per-epoch metric history of the run so far (restored on resume).
+        self._history: Dict[str, list] = {}
         use_cuda = self.device.type == "cuda"
         self.amp = bool(amp and use_cuda)
         self.scaler = torch.amp.GradScaler(self.device.type, enabled=self.amp)
@@ -99,14 +102,23 @@ class BaseTrainer:
 
     # ----------------------------------------------------------------- #
     def _maybe_resume(self) -> None:
-        """Load the newest checkpoint next to ``ckpt_path`` (model+optimizer+scheduler)."""
+        """Load the most-trained checkpoint of this run (model+optimizer+scheduler):
+        the periodic ``<stem>-epoch=N.pt`` files and the final ``ckpt_path``, by epoch.
+        An unreadable one (e.g. truncated by a killed job) falls back to the next."""
         if not self.ckpt_path:
             return
-        ckpt_dir = os.path.dirname(self.ckpt_path) or "."
-        path = latest_checkpoint(ckpt_dir)
-        if path is None:
+        candidates = resume_candidates(self.ckpt_path)
+        if not candidates:
             return
-        extra = load_checkpoint(path, self.model, self.optimizer, map_location=self.device)
+        for _, path in candidates:
+            try:
+                extra = load_checkpoint(path, self.model, self.optimizer, map_location=self.device)
+                break
+            except Exception as e:  # noqa: BLE001 - try the next-older checkpoint
+                print(f"Warning: cannot resume from {path} ({e!r}); trying the next-older checkpoint.")
+        else:
+            raise RuntimeError(f"--resume: none of the checkpoints of {self.ckpt_path!r} could be loaded: "
+                               f"{[p for _, p in candidates]}")
         self.start_epoch = int(extra.get("epoch", 0)) + 1
         self.global_step = int(extra.get("global_step", 0))
         if self.ema_model is not None:
@@ -119,6 +131,7 @@ class BaseTrainer:
                 pass
         if self.amp and extra.get("scaler") is not None:
             self.scaler.load_state_dict(extra["scaler"])
+        self._history = {k: list(v) for k, v in extra.get("history", {}).items()}
         if self.verbose:
             print(f"Resumed from {path} at epoch {self.start_epoch}")
 
@@ -346,7 +359,7 @@ class BaseTrainer:
             self.scheduler.step()
 
     def train(self) -> Dict[str, list]:
-        history: Dict[str, list] = defaultdict(list)
+        history: Dict[str, list] = defaultdict(list, {k: list(v) for k, v in self._history.items()})
         for epoch in range(self.start_epoch, self.epochs):
             epoch_start = time.perf_counter()
             self.model.train()
@@ -456,9 +469,10 @@ class BaseTrainer:
                                  "epoch_time": epoch_time, "sec_per_step": sec_per_step})
 
             if self.checkpoint_interval and self.ckpt_path and (epoch + 1) % self.checkpoint_interval == 0:
-                self._save(epoch, history)
+                self._save(epoch, history, epoch_checkpoint_path(self.ckpt_path, epoch + 1))
 
         if self.logger:
             self.logger.close()
-        self._save(self.epochs - 1, history)
+        # Resuming past --epochs runs no epoch; the weights are then those of start_epoch - 1.
+        self._save(max(self.epochs, self.start_epoch) - 1, history)
         return dict(history)
