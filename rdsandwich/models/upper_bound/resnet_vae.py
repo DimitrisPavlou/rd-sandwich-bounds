@@ -60,6 +60,7 @@ from rdsandwich.models.upper_bound._common import (
     softplus_scale,
 )
 from rdsandwich.models.upper_bound._common import tensor_stats as _tstats
+from rdsandwich.utils.torch_utils import call_fp32
 
 LOGIT_OFFSET = 1.0
 IMAGE_RANGES = ("0_255", "pm1")
@@ -126,9 +127,8 @@ class DecoderBlock(nn.Module):
 
     def forward(self, x):
         if self.img_output:
-            if self.image_range == "pm1":
-                return self.conv(x)
-            return (self.conv(x) + 0.5) * 255.0
+            x_hat = call_fp32(self.conv, x)
+            return x_hat if self.image_range == "pm1" else (x_hat + 0.5) * 255.0
         return self.shortcut(x) + self.conv2(self.conv1(x))
 
 
@@ -160,11 +160,11 @@ class LatentBlock(nn.Module):
             self.ar_scale = ChannelwiseARTransform(latent_channels, ar_num_slices, ar_max_support_ratio)
 
     def forward(self, b, t, stats: Optional[dict] = None):
-        det_feats, p_loc, p_scale = torch.split(self.gen_net(t), self.latent_channels, dim=1)
+        det_feats, p_loc, p_scale = torch.split(call_fp32(self.gen_net, t), self.latent_channels, dim=1)
         p_scale = softplus_scale(p_scale, self.scale_min)
 
-        bu_loc, bu_scale = torch.chunk(self.inf_net(b), 2, dim=1)
-        td_loc, td_scale = torch.chunk(self.td_inf_net(t), 2, dim=1)
+        bu_loc, bu_scale = torch.chunk(call_fp32(self.inf_net, b), 2, dim=1)
+        td_loc, td_scale = torch.chunk(call_fp32(self.td_inf_net, t), 2, dim=1)
         q_loc = bu_loc + td_loc
         q_scale = softplus_scale(bu_scale, self.scale_min) + softplus_scale(td_scale, self.scale_min)
         if self.res_q_param:  # parameterize q relative to the prior
@@ -285,8 +285,9 @@ class ResNetVAE(nn.Module):
         # Bottom-up: collect features in generative (top-to-bottom) order.
         bu_features: List[torch.Tensor] = []
         fx = x
-        for enc in self.encoders:
-            fx = enc(fx)
+        for j, enc in enumerate(self.encoders):
+            # The top block emits z0's posterior parameters, so like the other latent heads it runs in fp32.
+            fx = call_fp32(enc, fx) if j == self.num_levels - 1 else enc(fx)
             bu_features.insert(0, fx)  # last (topmost) ends at index 0
 
         bits_per_level: List[torch.Tensor] = []

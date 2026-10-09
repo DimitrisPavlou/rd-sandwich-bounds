@@ -267,6 +267,8 @@ port keeps that granularity (one hyperparameter combination per process), and:
   `torch.multiprocessing`) like any other PyTorch script.
 - **`--compile`, `--amp`, `--channels_last`** are trainer options, so every
   upper-bound model gets them; `--compile` gives the image models a large speedup.
+  `--amp` is bf16 autocast (no loss scaling); `--amp fp16` keeps the older fp16
+  autocast + gradient scaler.
 - **`RDLBTrainConfig.chunksize` / `cand_chunk`** bound peak memory in the
   lower bound's pairwise-MSE inner optimization, its main memory bottleneck for
   large `k` or high-resolution images.

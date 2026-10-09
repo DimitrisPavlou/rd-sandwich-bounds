@@ -10,7 +10,7 @@
 # so the real checkpoints are never touched.
 #
 # Run:   bash scripts/smoke/smoke_resnet_vae.sh
-#        bash scripts/smoke/smoke_resnet_vae.sh --amp            # extra flags go to train_ub
+#        bash scripts/smoke/smoke_resnet_vae.sh --amp            # extra flags go to train_ub (--amp = bf16, --amp fp16)
 #        DRY_RUN=1 bash scripts/smoke/smoke_resnet_vae.sh         # only print the commands
 # Env:   EPOCHS (2), LAMBDAS ("0.005 0.01 0.02 0.04 0.08 0.16"), COMPILE (1), PRELOAD (1),
 #        TRAIN_DATA (data/my_coco_train2017), KODAK (data/kodak),

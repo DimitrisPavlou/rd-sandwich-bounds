@@ -36,6 +36,18 @@ def lower_bound(x: torch.Tensor, bound: torch.Tensor) -> torch.Tensor:
     return torch.maximum(x, bound)
 
 
+def call_fp32(fn, *tensors: torch.Tensor):
+    """Call ``fn`` on fp32 copies of ``tensors`` with autocast disabled, so its output stays fp32
+    inside a bf16/fp16 autocast region. For layers whose output feeds the rate or the distortion
+    directly (latent heads, image heads, the DeepFactorized density), where rounding that output
+    to 16 bits would coarsen the model. Outside autocast it changes nothing.
+
+    (``fn(x.float())`` alone is not enough: autocast casts a conv/linear/matmul's inputs back down.)
+    """
+    with torch.autocast(tensors[0].device.type, enabled=False):
+        return fn(*(t.float() for t in tensors))
+
+
 def ema_update(prev: Optional[float], new: float, beta: float) -> float:
     """Exponential moving average: beta * prev + (1 - beta) * new."""
     if prev is None or beta == 0:

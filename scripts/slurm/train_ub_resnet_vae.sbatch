@@ -78,7 +78,9 @@ args=(
   --ema_warmup 10000
   --checkpoint_interval 1             # resumable every epoch
   --resume
-  --amp                               # mixed precision; same for both models
+  --amp fp16                          # mixed precision; same for both models.
+                                      # fp16 so the running --resume chain ends as it started;
+                                      # new runs: --amp (bf16) with a new --checkpoint_dir
   --compile                           # speed only
   --verbose
 )

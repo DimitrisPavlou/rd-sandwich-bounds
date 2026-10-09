@@ -60,7 +60,7 @@ fixed:
                                 #   decay; saved in the checkpoint and evaluated by default. null = off.
   # ema_warmup: 10000           # (int, 10000)  EMA warmup in steps: decay * (1 - exp(-step / ema_warmup)).
   skip_nonfinite: 0             # (int, 0)  skip up to N consecutive non-finite-gradient steps; 0 = abort.
-  amp: true                     # (bool, false)  fp16 mixed precision (autocast + gradient scaler).
+  amp: true                     # (str, null)  mixed precision: true or bf16 = bf16 autocast; fp16 = fp16 autocast + gradient scaler; false = fp32.
   compile: true                 # (bool, false)  torch.compile the loss (the first steps compile).
   channels_last: false          # (bool, false)  channels_last memory format.
   # --- run / bookkeeping ---

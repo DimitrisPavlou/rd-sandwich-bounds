@@ -22,6 +22,7 @@ from rdsandwich.models.upper_bound.ms2020_vae import MS2020VAE, MS2020VAEConfig
 from rdsandwich.models.upper_bound.mlp_vae import RDUBConfig, RDUBModel, check_no_decoder
 from rdsandwich.models.upper_bound.resnet_vae import IMAGE_RANGES, ResNetVAE, ResNetVAEConfig
 from rdsandwich.utils.io import config_dict_to_str
+from rdsandwich.utils.trainer import AMP_DTYPES
 from rdsandwich.cli.common import add_data_args, add_run_args, example_shape, float_list, int_list, new_parser
 
 MODELS = ("mlp_vae", "resnet_vae", "ms2020_vae", "variable_rate_lossy_vae")
@@ -239,7 +240,10 @@ def build_train_parser() -> argparse.ArgumentParser:
                         "(e.g. 0.9999); saved in the checkpoint and evaluated by default.")
     g.add_argument("--ema_warmup", type=int, default=10_000,
                    help="EMA warmup in steps: decay = DECAY * (1 - exp(-step / ema_warmup)).")
-    g.add_argument("--amp", action="store_true", help="Mixed precision (fp16 autocast + grad scaler).")
+    g.add_argument("--amp", nargs="?", const="bf16", default=None, choices=sorted(AMP_DTYPES),
+                   help="Mixed precision. --amp / --amp bf16: bf16 autocast, no loss scaling. "
+                        "--amp fp16: fp16 autocast + gradient scaler (the previous behaviour). "
+                        "Off: fp32.")
     g.add_argument("--compile", action="store_true",
                    help="torch.compile model.get_losses (large speedup for image models; "
                         "the first steps compile).")

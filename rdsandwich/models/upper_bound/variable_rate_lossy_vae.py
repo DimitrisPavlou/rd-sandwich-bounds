@@ -54,6 +54,7 @@ from rdsandwich.layers.convnext_adaln import (
     sinusoidal_embedding,
 )
 from rdsandwich.models.upper_bound._common import LN2, MSE_PM1_TO_255, gaussian_kl, tensor_stats
+from rdsandwich.utils.torch_utils import call_fp32
 
 # Architecture presets: (base channels C, latents per scale from 1x1 to 16x16
 # feature resolution w.r.t. a 64x64 input). Paper Tables 1 and 3.
@@ -138,7 +139,7 @@ class LatentVariableBlock(nn.Module):
     def transform_prior(self, feature, emb):
         """prior p(z_i | z_<i)"""
         feature = self.resnet_front(feature, emb)
-        pm, pv = self.prior(feature).chunk(2, dim=1)
+        pm, pv = call_fp32(self.prior, feature).chunk(2, dim=1)
         return feature, self._mean(pm), std_smooth(pv)
 
     def transform_posterior(self, feature, enc_feature, emb):
@@ -148,7 +149,7 @@ class LatentVariableBlock(nn.Module):
         feature = self.posterior1(feature, emb)
         merged = self.post_merge(torch.cat([feature, enc_feature], dim=1))
         merged = self.posterior2(merged, emb)
-        qm, qv = self.posterior(merged).chunk(2, dim=1)
+        qm, qv = call_fp32(self.posterior, merged).chunk(2, dim=1)
         return self._mean(qm), std_smooth(qv)
 
     def forward(self, feature, emb, enc_feature, stats: Optional[dict] = None):
@@ -299,7 +300,7 @@ class VariableRateLossyVAE(nn.Module):
         n, _, h, w = enc_features[min(enc_features.keys())].shape
         feature = self.bias.expand(n, -1, h, w)
         kls = []
-        for block in self.dec_blocks:
+        for block in self.dec_blocks[:-1]:
             if getattr(block, "is_latent_block", False):
                 block_stats = {} if stats is not None else None
                 feature, kl = block(feature, emb, enc_features[int(feature.shape[2])], stats=block_stats)
@@ -310,7 +311,8 @@ class VariableRateLossyVAE(nn.Module):
                 feature = block(feature, emb)
             else:
                 feature = block(feature)
-        return feature, kls
+        x_hat = call_fp32(self.dec_blocks[-1], feature)  # image head (4x sub-pixel upsampling to RGB)
+        return x_hat, kls
 
     def forward(self, x: torch.Tensor, lmbda: Union[None, float, torch.Tensor] = None,
                 training: Optional[bool] = None, return_stats: bool = False):

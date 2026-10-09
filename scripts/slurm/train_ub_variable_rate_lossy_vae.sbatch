@@ -67,7 +67,9 @@ args=(
   --ema_warmup 10000
   --checkpoint_interval 10            # resumable every 10 epochs
   --resume
-  --amp                               # mixed precision (Duan: fp32); same for both models
+  --amp fp16                          # mixed precision (Duan: fp32); same for both models.
+                                      # fp16 so the running --resume chain ends as it started;
+                                      # new runs: --amp (bf16) with a new --checkpoint_dir
   --verbose
   --compile
 )

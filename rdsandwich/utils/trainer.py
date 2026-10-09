@@ -27,6 +27,14 @@ from rdsandwich.utils.io import (JsonlLogger, MyJSONEncoder, epoch_checkpoint_pa
                                  resume_candidates, save_checkpoint)
 from rdsandwich.utils.lr_schedulers import WarmupReduceLROnPlateau
 
+# Autocast dtypes. Only fp16 needs loss scaling: bf16 has fp32's exponent range.
+AMP_DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16}
+
+
+def _checkpoint_amp(extra: Dict[str, Any]) -> Optional[str]:
+    """AMP mode a checkpoint was trained with; older ones only reveal fp16 via their scaler state."""
+    return extra.get("amp", "fp16" if extra.get("scaler") else None)
+
 
 class BaseTrainer:
     def __init__(
@@ -43,7 +51,7 @@ class BaseTrainer:
         ckpt_path: Optional[str] = None,
         verbose: bool = True,
         grad_clip: Optional[float] = None,
-        amp: bool = False,
+        amp: Optional[str] = None,
         checkpoint_interval: Optional[int] = None,
         val_fn: Optional[Callable[[], Dict[str, float]]] = None,
         monitor: str = "loss",
@@ -70,8 +78,8 @@ class BaseTrainer:
         self.val_fn = val_fn
         self.monitor = monitor
         self.terminate_on_nan = terminate_on_nan
-        # Non-finite gradients: without AMP, skip up to `max_nonfinite_skips` consecutive
-        # such steps (0 = abort on the first). With AMP, the GradScaler overflowing and
+        # Non-finite gradients: in fp32 and bf16, skip up to `max_nonfinite_skips` consecutive
+        # such steps (0 = abort on the first). With fp16 AMP, the GradScaler overflowing and
         # skipping a step is normal; only `amp_nonfinite_patience` consecutive ones
         # (i.e. the scale has already been cut ~2^patience) count as an explosion.
         self.max_nonfinite_skips = max_nonfinite_skips
@@ -84,9 +92,16 @@ class BaseTrainer:
         self.global_step = 0
         # Per-epoch metric history of the run so far (restored on resume).
         self._history: Dict[str, list] = {}
-        use_cuda = self.device.type == "cuda"
-        self.amp = bool(amp and use_cuda)
-        self.scaler = torch.amp.GradScaler(self.device.type, enabled=self.amp)
+        # Mixed precision: `amp` is "bf16", "fp16" or None (fp32), CUDA only.
+        if amp is not None and amp not in AMP_DTYPES:
+            raise ValueError(f"amp must be one of {sorted(AMP_DTYPES)} or None, got {amp!r}")
+        use_amp = amp is not None and self.device.type == "cuda"
+        if use_amp and amp == "bf16" and not torch.cuda.is_bf16_supported():
+            raise RuntimeError("bf16 autocast needs an Ampere-or-newer GPU; use --amp fp16.")
+        self.amp = amp if use_amp else None                  # as recorded in checkpoints
+        self.amp_dtype = AMP_DTYPES[amp] if use_amp else None
+        self.grad_scaling = self.amp == "fp16"               # GradScaler only for fp16
+        self.scaler = torch.amp.GradScaler(self.device.type, enabled=self.grad_scaling)
         # Exponential moving average of the weights (evaluated instead of the raw weights).
         self.ema_decay = ema_decay
         self.ema_warmup = ema_warmup
@@ -129,7 +144,11 @@ class BaseTrainer:
                 self.scheduler.load_state_dict(extra["scheduler"])
             except Exception:  # noqa: BLE001 - resume best-effort
                 pass
-        if self.amp and extra.get("scaler") is not None:
+        ckpt_amp = _checkpoint_amp(extra)
+        if ckpt_amp != self.amp:
+            print(f"Warning: {path} was trained with {ckpt_amp or 'fp32'}; "
+                  f"continuing in {self.amp or 'fp32'}.")
+        if self.grad_scaling and extra.get("scaler") is not None:
             self.scaler.load_state_dict(extra["scaler"])
         self._history = {k: list(v) for k, v in extra.get("history", {}).items()}
         if self.verbose:
@@ -260,7 +279,7 @@ class BaseTrainer:
             "grad_norm": grad_norm,
             "grad_clip": self.grad_clip,
             "amp": self.amp,
-            "amp_scale": self.scaler.get_scale() if self.amp else None,
+            "amp_scale": self.scaler.get_scale() if self.grad_scaling else None,
             "consecutive_nonfinite": self._consecutive_nonfinite,
             "batch": self._tensor_summary(batch),
             "num_nonfinite_params": len(bad_params),
@@ -341,12 +360,12 @@ class BaseTrainer:
         if not path:
             return
         extra = {"history": dict(history), "epoch": epoch, "global_step": self.global_step,
-                 **self.checkpoint_extra()}
+                 "amp": self.amp, **self.checkpoint_extra()}
         if self.ema_model is not None:
             extra["ema_state_dict"] = self.ema_model.state_dict()
         if self.scheduler is not None and hasattr(self.scheduler, "state_dict"):
             extra["scheduler"] = self.scheduler.state_dict()
-        if self.amp:
+        if self.grad_scaling:
             extra["scaler"] = self.scaler.state_dict()
         save_checkpoint(path, self.model, self.optimizer, extra=extra)
 
@@ -373,7 +392,8 @@ class BaseTrainer:
                         leave=False, dynamic_ncols=True, disable=not self.verbose)
             for x in pbar:
                 self.optimizer.zero_grad(set_to_none=True)
-                with torch.autocast(device_type=self.device.type, enabled=self.amp):
+                with torch.autocast(device_type=self.device.type, dtype=self.amp_dtype,
+                                    enabled=self.amp is not None):
                     loss, metrics = self.train_step(x)
                 if self.terminate_on_nan and not torch.isfinite(loss):
                     self._explosion_report("non-finite loss", x, epoch, n_steps, loss, None)
@@ -394,9 +414,11 @@ class BaseTrainer:
                 elif self.terminate_on_nan:
                     self._consecutive_nonfinite += 1
                     n_nonfinite += 1
-                    if self.amp:
-                        # Normal GradScaler overflow: scaler.step() below skips the
+                    if self.grad_scaling:
+                        # Normal fp16 GradScaler overflow: scaler.step() below skips the
                         # update and lowers the scale. Only persistent overflow is an issue.
+                        # (Without the scaler, scaler.step() is a plain optimizer.step(), so in
+                        # fp32/bf16 a non-finite gradient must take the skip/abort path below.)
                         if self._consecutive_nonfinite > self.amp_nonfinite_patience:
                             self._explosion_report("persistent non-finite gradients (amp)",
                                                    x, epoch, n_steps, loss, grad_norm)
@@ -431,7 +453,7 @@ class BaseTrainer:
                 n_steps += 1
                 pbar.set_postfix({k: f"{v / n_steps:.4g}" for k, v in running.items()}, refresh=False)
             pbar.close()
-            n_updates = max(n_steps - (0 if self.amp else n_nonfinite), 1)
+            n_updates = max(n_steps - (0 if self.grad_scaling else n_nonfinite), 1)
             for k in running:
                 running[k] /= n_updates
                 history[k].append(running[k])

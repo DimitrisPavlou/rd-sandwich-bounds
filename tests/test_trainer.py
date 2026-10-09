@@ -1,4 +1,4 @@
-"""Tests for the BaseTrainer extensions (grad clip, NaN guard, plateau LR, resume)."""
+"""Tests for the BaseTrainer extensions (grad clip, NaN guard, plateau LR, resume, mixed precision)."""
 import os
 
 import pytest
@@ -213,3 +213,83 @@ def test_save_checkpoint_is_atomic(tmp_path):
     path = str(tmp_path / "ckpt.pt")
     save_checkpoint(path, nn.Linear(2, 2))
     assert os.listdir(tmp_path) == ["ckpt.pt"]                 # no .tmp left behind
+
+
+# --------------------------------------------------------------------------- #
+# Mixed precision (--amp bf16 | fp16)
+# --------------------------------------------------------------------------- #
+_UB_ARGS = ["--dataset", "gaussian", "--model", "mlp_vae"]
+
+requires_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="autocast is CUDA-only")
+requires_bf16 = pytest.mark.skipif(not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()),
+                                   reason="needs a bf16-capable GPU")
+
+
+@pytest.mark.parametrize("flags, amp", [([], None), (["--amp"], "bf16"),
+                                        (["--amp", "bf16"], "bf16"), (["--amp", "fp16"], "fp16")])
+def test_amp_flag(flags, amp):
+    from rdsandwich.cli.upper_bound import build_train_parser
+
+    assert build_train_parser().parse_args(_UB_ARGS + flags).amp == amp
+
+
+def test_amp_flag_rejects_unknown_dtype_and_keeps_the_next_flag():
+    from rdsandwich.cli.upper_bound import build_train_parser
+
+    parser = build_train_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(_UB_ARGS + ["--amp", "fp32"])
+    args = parser.parse_args(_UB_ARGS + ["--amp", "--compile"])
+    assert args.amp == "bf16" and args.compile
+
+
+def test_amp_is_validated_and_cuda_only():
+    m = nn.Linear(4, 4)
+    loader, opt = _make(m)
+    with pytest.raises(ValueError, match="amp must be"):
+        _Trainer(m, loader, optimizer=opt, epochs=1, steps_per_epoch=1, amp="fp32", verbose=False)
+    tr = _Trainer(m, loader, optimizer=opt, epochs=1, steps_per_epoch=1, amp="bf16", verbose=False)
+    assert tr.amp is None and not tr.grad_scaling              # on CPU: plain fp32
+
+
+def test_resume_warns_on_a_precision_change(tmp_path, capsys):
+    _ckpt_trainer(tmp_path, 2).train()
+    path = os.path.join(tmp_path, "ckpt-lambda=64.pt")
+    assert torch.load(path, weights_only=False)["extra"]["amp"] is None
+    _ckpt_trainer(tmp_path, 3, resume=True)
+    assert "Warning" not in capsys.readouterr().out            # fp32 -> fp32
+    # A checkpoint from before "amp" was recorded: only its scaler state says fp16.
+    state = torch.load(path, weights_only=False)
+    del state["extra"]["amp"]
+    state["extra"]["scaler"] = {"scale": 65536.0}
+    torch.save(state, path)
+    _ckpt_trainer(tmp_path, 3, resume=True)
+    assert "trained with fp16; continuing in fp32" in capsys.readouterr().out
+
+
+@requires_bf16
+def test_bf16_has_no_scaler_and_never_applies_a_nonfinite_grad(tmp_path):
+    m, tr = _poison_grad_trainer(tmp_path, amp="bf16", device=torch.device("cuda"))
+    assert tr.amp == "bf16" and not tr.scaler.is_enabled()
+    with pytest.raises(FloatingPointError, match="Non-finite gradient"):
+        tr.train()
+    assert all(torch.isfinite(p).all() for p in m.parameters())
+
+
+@requires_bf16
+def test_bf16_nonfinite_grad_skip_keeps_weights_finite(tmp_path):
+    m, tr = _poison_grad_trainer(tmp_path, amp="bf16", device=torch.device("cuda"), max_nonfinite_skips=5)
+    hist = tr.train()
+    assert all(torch.isfinite(p).all() for p in m.parameters())
+    assert hist["nonfinite_grad_steps"] == [1]
+
+
+@requires_cuda
+def test_fp16_scaler_state_is_saved_and_restored(tmp_path):
+    tr = _ckpt_trainer(tmp_path, 2, amp="fp16", device=torch.device("cuda"))
+    assert tr.grad_scaling and tr.scaler.is_enabled()
+    tr.train()
+    extra = torch.load(os.path.join(tmp_path, "ckpt-lambda=64.pt"), weights_only=False)["extra"]
+    assert extra["amp"] == "fp16" and "scaler" in extra
+    resumed = _ckpt_trainer(tmp_path, 3, amp="fp16", device=torch.device("cuda"), resume=True)
+    assert resumed.scaler.get_scale() == tr.scaler.get_scale()

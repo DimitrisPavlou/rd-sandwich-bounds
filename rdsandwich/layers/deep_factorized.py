@@ -36,6 +36,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from rdsandwich.utils.torch_utils import call_fp32
+
 
 class DeepFactorized(nn.Module):
     """A per-channel deep factorized density over ``channels`` independent channels.
@@ -109,7 +111,7 @@ class DeepFactorized(nn.Module):
         M = int(np.prod(lead)) if lead else 1
         # [..., C] -> [C, 1, M]
         xc = x.reshape(M, self.channels).permute(1, 0).unsqueeze(1).contiguous()
-        logit, dlogit = self._cumulative_and_derivative(xc)
+        logit, dlogit = call_fp32(self._cumulative_and_derivative, xc)
         # log p = log sigmoid'(logit) + log|dlogit/dx|
         #       = logsigmoid(logit) + logsigmoid(-logit) + log(dlogit)
         log_p = (
@@ -147,8 +149,8 @@ class DeepFactorized(nn.Module):
         lead = y.shape[:-1]
         M = int(np.prod(lead)) if lead else 1
         yc = y.reshape(M, self.channels).permute(1, 0).unsqueeze(1).contiguous()
-        upper, _ = self._cumulative_and_derivative(yc + 0.5)
-        lower, _ = self._cumulative_and_derivative(yc - 0.5)
+        upper, _ = call_fp32(self._cumulative_and_derivative, yc + 0.5)
+        lower, _ = call_fp32(self._cumulative_and_derivative, yc - 0.5)
         prob = torch.clamp(torch.abs(torch.sigmoid(upper) - torch.sigmoid(lower)), min=1e-12)
         log_p = torch.log(prob)
         log_p = log_p.squeeze(1).permute(1, 0).reshape(*lead, self.channels)
