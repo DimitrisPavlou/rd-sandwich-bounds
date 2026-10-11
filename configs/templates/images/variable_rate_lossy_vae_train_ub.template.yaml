@@ -46,6 +46,8 @@ fixed:
                                 #   1/64, 1/32, 1/16, 1/8, 1/4 of the image resolution.
   no_smooth: false              # (bool, false)  turn off the smoothing of posterior / prior means (eq. 8;
                                 #   the paper's ablation).
+  scale_min: 1.0e-7             # (float, 1.0e-7)  floor on every posterior / prior scale; 0 = Duan's
+                                #   original (unbounded; prone to KL overflow at high lambda).
   lmb_range: [4.0, 2048.0]      # (list[float], [4, 2048])  training lambda range, sampled log-uniformly per
                                 #   image. Lambda is Duan's: loss = KL nats/dim + lambda * MSE on [-1, 1].
   # lambda: 0.01                # (float, 0.01)  not used in training (lambda is sampled); set at evaluation.

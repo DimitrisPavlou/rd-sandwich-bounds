@@ -98,10 +98,12 @@ def linear_sqrt(x: torch.Tensor, threshold: float = 6.0) -> torch.Tensor:
 SOFTPLUS_BETA = math.log(2)
 
 
-def std_smooth(v: torch.Tensor) -> torch.Tensor:
+def std_smooth(v: torch.Tensor, scale_min: float = 0.0) -> torch.Tensor:
     """Positive scale from a raw output: softplus with beta = ln 2 (scale 1 at v = 0).
-    https://arxiv.org/abs/2203.13751, Sec. 4.2."""
-    return F.softplus(v, beta=SOFTPLUS_BETA, threshold=12)
+    https://arxiv.org/abs/2203.13751, Sec. 4.2.
+
+    ``scale_min`` floors the scale for stability"""
+    return F.softplus(v, beta=SOFTPLUS_BETA, threshold=12) + scale_min
 
 
 # --------------------------------------------------------------------------- #
@@ -113,11 +115,12 @@ class LatentVariableBlock(nn.Module):
     feature (Fig. 2, right)."""
 
     def __init__(self, width, zdim, embed_dim, enc_width=None, kernel_size=7, mlp_ratio=2,
-                 smooth=True):
+                 smooth=True, scale_min=0.0):
         super().__init__()
         self.in_channels = width
         self.out_channels = width
         self.smooth = smooth
+        self.scale_min = scale_min
 
         block = ConvNeXtBlockAdaLN
         enc_width = enc_width or width
@@ -140,7 +143,7 @@ class LatentVariableBlock(nn.Module):
         """prior p(z_i | z_<i)"""
         feature = self.resnet_front(feature, emb)
         pm, pv = call_fp32(self.prior, feature).chunk(2, dim=1)
-        return feature, self._mean(pm), std_smooth(pv)
+        return feature, self._mean(pm), std_smooth(pv, self.scale_min)
 
     def transform_posterior(self, feature, enc_feature, emb):
         """posterior q(z_i | z_<i, x)"""
@@ -150,7 +153,7 @@ class LatentVariableBlock(nn.Module):
         merged = self.post_merge(torch.cat([feature, enc_feature], dim=1))
         merged = self.posterior2(merged, emb)
         qm, qv = call_fp32(self.posterior, merged).chunk(2, dim=1)
-        return self._mean(qm), std_smooth(qv)
+        return self._mean(qm), std_smooth(qv, self.scale_min)
 
     def forward(self, feature, emb, enc_feature, stats: Optional[dict] = None):
         """Returns the updated top-down feature and the elementwise KL (nats)."""
@@ -198,6 +201,8 @@ class VariableRateLossyVAEConfig:
     # Encoder ConvNeXt blocks at the 1/4, 1/8, 1/16, 1/32, 1/64 resolutions.
     enc_blocks_per_scale: List[int] = field(default_factory=lambda: [6, 6, 6, 4, 4])
     smooth: bool = True
+    # Floor on every posterior / prior scale (0 = Duan's original, unbounded); see std_smooth.
+    scale_min: float = 1e-7
     # Variable rate: lambda ~ log-uniform(lmb_range) per image during training.
     lmb_range: Tuple[float, float] = (4.0, 2048.0)
     # Lambda used when none is given and the model is not training (evaluation).
@@ -249,7 +254,8 @@ class VariableRateLossyVAE(nn.Module):
         dec_blocks = []
         for j in range(5):
             dec_blocks += [LatentVariableBlock(dec_widths[j], cfg.z_dim, emb_dim,
-                                               enc_width=widths[4 - j], smooth=cfg.smooth)
+                                               enc_width=widths[4 - j], smooth=cfg.smooth,
+                                               scale_min=cfg.scale_min)
                            for _ in range(cfg.latents_per_scale[j])]
             if j < 4:
                 dec_blocks.append(patch_upsample(dec_widths[j], dec_widths[j + 1], rate=2))

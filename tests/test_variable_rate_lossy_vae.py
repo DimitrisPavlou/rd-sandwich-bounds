@@ -10,6 +10,7 @@ from rdsandwich.models.upper_bound.variable_rate_lossy_vae import (
     VariableRateLossyVAE,
     VariableRateLossyVAEConfig,
     linear_sqrt,
+    std_smooth,
 )
 from rdsandwich.upper_bound.evaluate import evaluate_full_images
 
@@ -156,6 +157,28 @@ def test_smooth_flag_only_changes_the_means():
     assert torch.allclose(pm_s, linear_sqrt(pm_p))
 
 
+def test_scale_min_floors_every_latent_scale():
+    """Posterior and prior scales never go below cfg.scale_min; 0 keeps Duan's unbounded softplus."""
+    v = torch.tensor([-1000.0, 0.0])
+    assert std_smooth(v)[0].item() == 0.0                                  # Duan's: collapses to 0
+    assert std_smooth(v, 1e-3)[0].item() == pytest.approx(1e-3)
+    assert std_smooth(v, 1e-3)[1].item() == pytest.approx(1.0 + 1e-3)     # scale 1 at v = 0, shifted
+
+    torch.manual_seed(0)
+    m = _tiny(scale_min=1e-2).train()
+    for block in m.dec_blocks:                     # push every raw scale far negative
+        if getattr(block, "is_latent_block", False):
+            for head in (block.prior, block.posterior):
+                zdim = head.out_channels // 2
+                head.bias.data[zdim:] = -1e4
+    stats = m(_images(), return_stats=True)["stats"]
+    latents = [v for k, v in stats.items() if k.startswith("latent")]
+    assert latents
+    for s in latents:
+        assert s["q_scale"]["min"] == pytest.approx(1e-2) and s["p_scale"]["min"] == pytest.approx(1e-2)
+        assert s["kl"]["nonfinite"] == 0
+
+
 def test_fits_a_fixed_batch_at_fixed_lambda():
     torch.manual_seed(0)
     m = _tiny().train()
@@ -199,6 +222,18 @@ def test_cli_builds_model_and_run_name():
                          "--preset", "c64_l5",
                          "--latents_per_scale", "1,1,1,2,2"])
     assert build_model(args).cfg.latents_per_scale == [1, 1, 1, 2, 2]
+
+
+def test_cli_scale_min_defaults_per_model():
+    p = build_train_parser()
+    vr = ["--model", "variable_rate_lossy_vae", "--dataset", "x", "--preset", "tiny"]
+    assert build_model(p.parse_args(vr)).cfg.scale_min == VariableRateLossyVAEConfig.scale_min
+    assert build_model(p.parse_args(vr + ["--scale_min", "0"])).cfg.scale_min == 0.0   # Duan's original
+    # The floor does not change the run name, so a run can resume across it.
+    assert get_runname(p.parse_args(vr)) == get_runname(p.parse_args(vr + ["--scale_min", "0"]))
+    rn = ["--model", "resnet_vae", "--dataset", "x"]
+    assert build_model(p.parse_args(rn)).cfg.scale_min == 1e-5                        # unchanged
+    assert build_model(p.parse_args(rn + ["--scale_min", "1e-3"])).cfg.scale_min == 1e-3
 
 
 def test_linear_sqrt_gradient_is_finite_in_fp16():

@@ -59,8 +59,11 @@ def add_model_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--latent_channels", type=int_list, default=[4, 8, 16, 32, 64, 128])
     g.add_argument("--ar_prior_levels", type=int, default=4)
     g.add_argument("--ar_slices", type=int, default=8)
-    g.add_argument("--scale_min", type=float, default=1e-5,
-                   help="Floor on every Gaussian latent scale (numerical stability).")
+    g.add_argument("--scale_min", type=float, default=None,
+                   help="Floor on every Gaussian latent scale (numerical stability). resnet_vae and "
+                        f"variable_rate_lossy_vae; default: {ResNetVAEConfig.scale_min:g} and "
+                        f"{VariableRateLossyVAEConfig.scale_min:g} respectively "
+                        "(variable_rate_lossy_vae: 0 = Duan's original, unbounded).")
     g.add_argument("--image_range", choices=IMAGE_RANGES, default="0_255",
                    help="0_255: loss = bpp + lambda * MSE on [0, 255] (Yang & Mandt). "
                         "pm1: loss = KL nats/dim + lambda * MSE on [-1, 1] (Duan et al.; "
@@ -117,7 +120,8 @@ def build_model(args):
         return ResNetVAE(ResNetVAEConfig(
             latent_channels=args.latent_channels, num_filters=args.num_filters,
             ar_prior_levels=args.ar_prior_levels, ar_slices=args.ar_slices,
-            lmbda=args.lmbda, scale_min=args.scale_min, image_range=args.image_range,
+            lmbda=args.lmbda, image_range=args.image_range,
+            scale_min=ResNetVAEConfig.scale_min if args.scale_min is None else args.scale_min,
         ))
     if args.model == "ms2020_vae":
         return MS2020VAE(MS2020VAEConfig(
@@ -136,6 +140,7 @@ def variable_rate_config(args) -> VariableRateLossyVAEConfig:
     return VariableRateLossyVAEConfig.from_preset(
         args.preset, base_channels=args.base_channels, latents_per_scale=args.latents_per_scale,
         smooth=not args.no_smooth, lmb_range=tuple(args.lmb_range), lmbda=args.lmbda,
+        scale_min=args.scale_min,
     )
 
 

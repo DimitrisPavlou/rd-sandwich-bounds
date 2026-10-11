@@ -38,6 +38,7 @@ fixed:
   # base_channels: 128          # (int, null)  the training run's override of the preset's C, if any.
   # latents_per_scale: [1, 2, 3, 4, 5]   # (list[int], null)  the training run's override, if any.
   no_smooth: false              # (bool, false)  the training run's smoothing setting.
+  scale_min: 1.0e-7             # (float, 1.0e-7)  the training run's scale floor (0 for Duan's checkpoints).
   lmb_range: [4.0, 2048.0]      # (list[float], [4, 2048])  the training run's lambda range.
 
   # ===== 3. evaluation =======================================================
