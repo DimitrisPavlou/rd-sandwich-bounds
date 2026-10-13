@@ -11,7 +11,7 @@ last ``--last_n`` epochs. PSNR is computed from that mean MSE. A
 their training logs average over randomly drawn lambdas.
 
 Note: these are *training-set* numbers (random crops, continuous relaxation),
-not the held-out eval that ``evaluation/plot_qr.py`` plots.
+not the held-out eval of ``evaluation/evaluate.py`` and ``evaluation/plot.py``.
 
     python evaluation/plot_image_ub_training.py --checkpoint_dir checkpoints \
         --out_prefix results/resnet_vae_train

@@ -1,10 +1,13 @@
-"""Every config and template must be accepted by the CLI it targets.
+"""Every sweep config and template must be accepted by the CLI it targets.
 
-For each YAML file under ``configs/`` (``configs/<source>/`` and
+For each sweep YAML file under ``configs/`` (``configs/<source>/`` and
 ``configs/templates/<source>/``, source = gaussian | physics | images), every expanded run
 is rendered to argv exactly as ``scripts/run_sweep.py`` would, and parsed by the
 real argument parser of each script it names. This catches renamed or removed
 flags, typos, and scripts that no longer exist, without launching anything.
+
+The ``eval/`` and ``plots/`` folders hold the configs of ``evaluation/evaluate.py`` and
+``evaluation/plot.py``, which are not sweeps; ``tests/test_evaluation.py`` checks them.
 """
 import glob
 import os
@@ -15,8 +18,17 @@ from rdsandwich.cli.parsers import PARSERS
 from rdsandwich.sweep import expand_sweep, get_scripts, load_config, params_to_argv, script_params
 
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "..", "configs")
-CONFIGS = sorted(glob.glob(os.path.join(CONFIG_DIR, "**", "*.yaml"), recursive=True))
 SOURCES = ("gaussian", "physics", "images")
+NOT_SWEEPS = ("eval", "plots")  # evaluation/evaluate.py and evaluation/plot.py configs
+
+
+def _is_sweep(path):
+    rel = os.path.relpath(path, CONFIG_DIR).split(os.sep)
+    return (rel[1] if rel[0] == "templates" else rel[0]) not in NOT_SWEEPS
+
+
+CONFIGS = sorted(p for p in glob.glob(os.path.join(CONFIG_DIR, "**", "*.yaml"), recursive=True)
+                 if _is_sweep(p))
 
 
 @pytest.mark.parametrize("path", CONFIGS, ids=lambda p: os.path.relpath(p, CONFIG_DIR))
@@ -76,7 +88,8 @@ def _required_flags(build_parser, model):
 
 def test_every_template_file_is_known():
     found = sorted(os.path.relpath(p, TEMPLATE_DIR)
-                   for p in glob.glob(os.path.join(TEMPLATE_DIR, "**", "*.yaml"), recursive=True))
+                   for p in glob.glob(os.path.join(TEMPLATE_DIR, "**", "*.yaml"), recursive=True)
+                   if _is_sweep(p))
     assert found == sorted(TEMPLATES)
 
 

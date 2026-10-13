@@ -5,8 +5,8 @@
 # (configs/images/ms2020_vae_train_ub.yaml): full-size MS2020-VAE (latent_depth 320,
 # hyperprior_depth 192, 192 filters, 10 slices), the whole COCO training set, 256x256
 # patches, batch 16, all 6 lambdas, torch.compile + AMP. Only --epochs differs (2 instead
-# of 2000). For every lambda: train_ub -> eval_ub on Kodak (and Tecnick, if present)
-# -> then plot_qr.
+# of 2000). For every lambda: train_ub; then evaluation/evaluate.py on Kodak (and Tecnick,
+# if present) and evaluation/plot.py.
 # Outputs go to checkpoints/smoke/ms2020_vae and results/smoke/ms2020_vae (wiped first),
 # so the real checkpoints are never touched.
 #
@@ -39,22 +39,29 @@ train="--dataset $TRAIN_DATA --patchsize 256 --batchsize 16 --num_workers 10 --l
 [ "${AMP:-1}" = 1 ] && train+=" --amp"
 [ "${PRELOAD:-0}" = 1 ] && train+=" --preload"
 
-evalsets=("$KODAK")
-if [ -d "$TECNICK" ]; then evalsets+=("$TECNICK"); else echo "(no Tecnick at $TECNICK; evaluating on Kodak only)"; fi
+datasets="kodak: \"$KODAK\""; names="kodak"
+if [ -d "$TECNICK" ]; then datasets+=", tecnick: \"$TECNICK\""; names+=", tecnick"
+else echo "(no Tecnick at $TECNICK; evaluating on Kodak only)"; fi
 
 for lamb in $LAMBDAS; do
   echo "=== [ms2020_vae] train $EPOCHS epochs, lambda=$lamb ==="
   run python train/train_ub.py -V $DEV $arch $train --lambda "$lamb" --epochs "$EPOCHS" "$@"
-  for data in "${evalsets[@]}"; do
-    echo "=== [ms2020_vae] eval on $data, lambda=$lamb ==="
-    run python evaluation/eval_ub.py $DEV $arch --lambda "$lamb" --checkpoint_dir $CKPT \
-      --dataset "$data" --results_dir $RES
-  done
 done
 
-for data in "${evalsets[@]}"; do
-  ds=$(python -c "from rdsandwich.data.datasets import dataset_name; print(dataset_name('$data'))")
-  run python evaluation/plot_qr.py --models ms2020_vae --dataset "$ds" --results_dir $RES --out $RES/qr_$ds.png
-  run python evaluation/plot_qr.py --models ms2020_vae --dataset "$ds" --results_dir $RES --out $RES/rd_$ds.png --rd
-done
+mkdir -p $RES
+cat > $RES/eval.yaml <<EOF
+name: ms2020_vae
+checkpoints: ["$CKPT/rdub-model=ms2020_vae-lambda=*"]
+datasets: {$datasets}
+results_dir: $RES
+device: ${DEVICE:-null}
+EOF
+cat > $RES/plot.yaml <<EOF
+out_dir: $RES
+curves: [ms2020_vae]
+datasets: [$names]
+results_dir: $RES
+EOF
+run python evaluation/evaluate.py --config $RES/eval.yaml
+run python evaluation/plot.py --config $RES/plot.yaml
 echo "=== ms2020_vae smoke test PASSED (figures in $RES) ==="

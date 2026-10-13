@@ -3,8 +3,11 @@
 # =============================================================================
 # Evaluates trained ResNet-VAE checkpoints on whole test images (Kodak, Tecnick):
 # per-image bpp, MSE and PSNR on the [0, 255] scale (unrounded and 8-bit-rounded),
-# written to <results_dir>/rdub-model=<key>-lambda=<lambda>-dataset=<name>.npz for
-# evaluation/plot_qr.py. Experiments: images/resnet_vae_eval_ub*.yaml.
+# written to <results_dir>/rdub-model=<key>-lambda=<lambda>-dataset=<name>.npz.
+# Experiments: images/resnet_vae_eval_ub*.yaml.
+# For R-D / Q-R curves and comparison plots, configs/templates/eval/ and
+# configs/templates/plots/ (evaluation/evaluate.py, evaluation/plot.py) are simpler:
+# no model flags, and every lambda in one run.
 #
 # Lists EVERY flag evaluation/eval_ub.py accepts for this model, as (type, default)
 # plus a one-line description, in three sections: 1. data, 2. model, 3. evaluation.

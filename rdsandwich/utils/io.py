@@ -213,3 +213,23 @@ def resume_candidates(path: str) -> List[Tuple[int, str]]:
             print(f"Warning: cannot read {path} ({e!r}); not resuming from it.")
     return [(n, p) for n, _, p in sorted(candidates, reverse=True)]
 
+
+_EPOCH_SUFFIX = re.compile(r"-epoch=\d+(?=\.pt$)")
+
+
+def final_checkpoint(run_dir: str) -> str:
+    """The most-trained checkpoint of a run directory, by epoch (as ``--resume`` picks it),
+    not by modification time, which copying the files from another machine scrambles.
+
+    The directory must hold one checkpoint series: a final ``<stem>.pt`` and/or its
+    periodic ``<stem>-epoch=NNNN.pt`` files (``explosion-*`` dumps are ignored)."""
+    files = [f for f in os.listdir(run_dir) if f.endswith(".pt") and not f.startswith("explosion-")]
+    stems = {_EPOCH_SUFFIX.sub("", f) for f in files}
+    if len(stems) != 1:
+        raise ValueError(f"{run_dir!r}: expected one checkpoint series, found {sorted(stems) or 'none'}; "
+                         "name the checkpoint file instead")
+    candidates = resume_candidates(os.path.join(run_dir, stems.pop()))
+    if not candidates:
+        raise ValueError(f"{run_dir!r}: no readable checkpoint")
+    return candidates[0][1]
+

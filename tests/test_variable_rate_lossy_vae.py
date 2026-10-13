@@ -4,7 +4,7 @@ import math
 import pytest
 import torch
 
-from rdsandwich.cli.upper_bound import build_model, build_train_parser, downsampling_factor, get_runname
+from rdsandwich.cli.upper_bound import build_model, build_train_parser, get_runname
 from rdsandwich.models.upper_bound.variable_rate_lossy_vae import (
     MSE_PM1_TO_255,
     VariableRateLossyVAE,
@@ -213,7 +213,7 @@ def test_cli_builds_model_and_run_name():
                          "--lambda", "64", "--no_smooth"])
     m = build_model(args)
     assert isinstance(m, VariableRateLossyVAE) and not m.cfg.smooth and m.cfg.lmbda == 64.0
-    assert downsampling_factor(args) == 64
+    assert m.max_stride == 64
     assert get_runname(args) == (
         "rdub-model=variable_rate_lossy_vae-C=8-L=1_1_1_1_1-lmb=4_2048-nosmooth-tiny")
     args = p.parse_args(["--model", "variable_rate_lossy_vae", "--dataset", "x"])

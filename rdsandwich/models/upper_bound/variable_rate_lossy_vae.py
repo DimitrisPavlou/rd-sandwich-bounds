@@ -231,6 +231,7 @@ class VariableRateLossyVAEConfig:
 class VariableRateLossyVAE(nn.Module):
     MAX_LMB = 8192  # lambda normalization for the sinusoidal embedding
     max_stride = 64  # total downsampling; image sides must be multiples of this
+    variable_rate = True  # one model for every lambda in cfg.lmb_range: forward(x, lmbda=...)
 
     def __init__(self, cfg: VariableRateLossyVAEConfig):
         super().__init__()

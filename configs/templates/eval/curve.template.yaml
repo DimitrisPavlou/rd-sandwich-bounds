@@ -1,0 +1,46 @@
+# =============================================================================
+# TEMPLATE: one evaluated curve  ->  evaluation/evaluate.py
+# =============================================================================
+# Evaluates trained image upper-bound checkpoints on whole test images and writes
+# <results_dir>/<name>_<dataset>.json per dataset (per-lambda bpp, MSE, PSNR, unrounded
+# and 8-bit-rounded, plus per-image values), for evaluation/plot.py.
+#
+# The model is rebuilt from each checkpoint (it stores its config), so no model flags.
+#   * fixed-rate models (resnet_vae, ms2020_vae): list one checkpoint per lambda and
+#     leave `lambdas` out; each checkpoint is evaluated at the lambda it was trained with.
+#   * variable-rate model (variable_rate_lossy_vae): list its one checkpoint and set
+#     `lambdas` (Duan's units, within the model's training range, e.g. [4, 2048]).
+#
+# Lists every key, as (type, default) plus a one-line description. Copy it to
+# configs/eval/<name>.yaml (git-ignored) and edit.
+#
+# Run:   python evaluation/evaluate.py --config configs/eval/<name>.yaml
+#        (datasets that already have a result file are skipped; --force redoes them)
+# =============================================================================
+
+name: vr_c64_l15_ep150        # (str, REQUIRED)  result files are <results_dir>/<name>_<dataset>.json;
+                              #   plot configs list curves by this name.
+label: "Variable-rate VAE, C=64 (epoch 150)"   # (str, name)  legend text.
+
+# (list[str], REQUIRED)  checkpoint files, run directories, or globs of either. A run
+# directory stands for its most-trained checkpoint (by epoch, not file time). At most one
+# checkpoint per run directory.
+checkpoints:
+  - checkpoints/lvae_variable_rate_full_coco_c64_l15/rdub-model=variable_rate_lossy_vae-C=64-L=1_2_3_4_5-lmb=4_2048/ckpt-epoch=0150.pt
+  # fixed-rate example, every lambda's run directory:
+  # - checkpoints/resnet_vae_full_coco/rdub-model=resnet_vae-range=pm1-lambda=*
+
+# (list[float], null)  variable-rate models only: the lambdas to evaluate at.
+lambdas: [4, 8, 16, 22.6, 32, 64, 128, 181, 256, 512, 1024, 1448, 2048]
+
+# (dict[str, str], REQUIRED)  dataset short name -> image directory or glob. The short
+# name goes into the result file name and the plot titles.
+datasets:
+  kodak: data/kodak
+  tecnick: data/technik
+
+results_dir: results          # (str, results)  where the result files are written.
+use_ema: true                 # (bool, true)  evaluate the EMA weights when the checkpoint has them.
+# device: cuda                # (str, null)  e.g. cuda, cuda:1, cpu; null = cuda if available.
+seed: 0                       # (int, 0)  random seed, reset before every (lambda, dataset) point.
+# max_images: 2               # (int, null)  only the first N images of each dataset (quick checks).

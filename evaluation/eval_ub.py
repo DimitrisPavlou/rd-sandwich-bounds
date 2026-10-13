@@ -2,15 +2,16 @@
 """Evaluate a trained R-D UPPER-BOUND model (written by ``train/train_ub.py``).
 
 Pass the same model flags (and lambda / checkpoint_dir) as for training: they
-determine the run directory, whose newest checkpoint is loaded (or ``--ckpt``).
+determine the run directory, whose most-trained checkpoint is loaded (or ``--ckpt``).
 
 * ``--mode full_image`` (default for image folders): per-image bpp / MSE / PSNR
   on whole Kodak/Tecnick images (unrounded and 8-bit-rounded reconstructions),
   saved to ``<results_dir>/rdub-model=<key>-lambda=<lambda>-dataset=<name>.npz``,
   where ``<key>`` is the model plus any curve-defining tags (e.g.
-  ``resnet_vae-range=pm1``; see ``model_key``). Read by ``evaluation/plot_qr.py``.
-  For the variable-rate ``variable_rate_lossy_vae``, run once per ``--lambda`` on the same
-  checkpoint.
+  ``resnet_vae-range=pm1``; see ``model_key``). For the variable-rate
+  ``variable_rate_lossy_vae``, run once per ``--lambda`` on the same checkpoint.
+  For R-D / Q-R curves and comparison plots, prefer ``evaluation/evaluate.py`` and
+  ``evaluation/plot.py``: they need no model flags and evaluate every lambda in one run.
 * ``--mode sampled`` (default otherwise): (D, R) mean / std / 95% CI over
   ``--num_batches`` batches, saved to ``<results_dir>/<run name>-dataset=<name>.npz``.
 
@@ -26,7 +27,6 @@ from rdsandwich.cli.common import is_image_dataset, load_dataset
 from rdsandwich.cli.upper_bound import (
     build_eval_parser,
     build_model,
-    downsampling_factor,
     finalize_args,
     get_runname,
     model_key,
@@ -35,7 +35,7 @@ from rdsandwich.cli.upper_bound import (
 from rdsandwich.data.datasets import dataset_name
 from rdsandwich.upper_bound.evaluate import evaluate_full_images, evaluate_sampled
 from rdsandwich.utils.torch_utils import get_device, seed_everything
-from rdsandwich.utils.io import latest_checkpoint, load_checkpoint
+from rdsandwich.utils.io import final_checkpoint, load_checkpoint
 
 
 def main():
@@ -47,9 +47,12 @@ def main():
     finalize_args(args, dataset)
     model = build_model(args).to(device)
 
-    ckpt = args.ckpt or latest_checkpoint(run_dir(args))
-    if ckpt is None:
-        raise SystemExit(f"No checkpoint found in {run_dir(args)!r}; train this run first.")
+    if args.ckpt:
+        ckpt = args.ckpt
+    elif os.path.isdir(run_dir(args)):
+        ckpt = final_checkpoint(run_dir(args))
+    else:
+        raise SystemExit(f"No run directory {run_dir(args)!r}; train this run first.")
     extra = load_checkpoint(ckpt, model, map_location=device, use_ema=not args.no_ema)
     model.eval()
     weights = "EMA" if ("ema_state_dict" in extra and not args.no_ema) else "raw"
@@ -64,7 +67,7 @@ def main():
     if mode == "full_image":
         if not is_image_dataset(dataset):
             raise SystemExit("--mode full_image needs an image-folder --dataset.")
-        res = evaluate_full_images(model, dataset.all_images(), pad_factor=downsampling_factor(args),
+        res = evaluate_full_images(model, dataset.all_images(), pad_factor=model.max_stride,
                                    device=device)
         out_path = os.path.join(
             args.results_dir, f"rdub-model={model_key(args)}-lambda={args.lmbda:g}-dataset={dsname}.npz")

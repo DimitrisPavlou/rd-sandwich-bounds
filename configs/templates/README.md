@@ -6,10 +6,18 @@ the experiment configs one directory up:
 
 ```
 configs/
-  gaussian/    physics/    images/          experiment configs
+  gaussian/    physics/    images/          experiment configs (sweeps)
+  eval/        plots/                       evaluation/evaluate.py and evaluation/plot.py configs
   templates/
     gaussian/  physics/    images/          one template per (model, script)
+    eval/      plots/                       one template each
 ```
+
+The `eval/` and `plots/` configs are not sweeps: each `eval/` config is one evaluated
+curve (checkpoints, test sets, and lambdas for a variable-rate model), each `plots/`
+config one set of comparison figures. They are described in the top-level README
+("Evaluating and comparing image models"); `tests/test_evaluation.py` checks that their
+templates load and list every key. The rest of this page is about the sweep configs.
 
 File names say only the model, the script and the bound, since the folder says the
 source: `<model>_<train|eval>_<ub|lb>[_<variant>].yaml`, with `train_eval` for the
@@ -55,6 +63,8 @@ Inside `fixed:`, flags are grouped in three sections, in this order:
 | [`images/ms2020_vae_train_ub.template.yaml`](images/ms2020_vae_train_ub.template.yaml) | `train/train_ub.py` | Minnen & Singh 2020 beta-VAE |
 | [`images/ms2020_vae_eval_ub.template.yaml`](images/ms2020_vae_eval_ub.template.yaml) | `evaluation/eval_ub.py` | Minnen & Singh 2020 beta-VAE |
 | [`images/cnn_train_eval_lb.template.yaml`](images/cnn_train_eval_lb.template.yaml) | `train/train_lb.py` then `evaluation/eval_lb.py` | lower bound, CNN log-u network |
+| [`eval/curve.template.yaml`](eval/curve.template.yaml) | `evaluation/evaluate.py` | any image upper-bound model, one curve |
+| [`plots/comparison.template.yaml`](plots/comparison.template.yaml) | `evaluation/plot.py` | Q-R / R-D comparison figures |
 
 ## Which template backs which experiment config
 

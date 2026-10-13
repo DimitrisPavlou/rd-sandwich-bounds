@@ -6,7 +6,8 @@ To add a new upper-bound model:
      ``get_losses(x) -> (loss, rate, distortion)`` (and, for full-image
      evaluation, a ``forward(x)`` returning ``x_hat`` and per-image ``bits``);
   2. add its name to ``MODELS``, its flags to ``add_model_args``, and a branch to
-     ``build_model`` (plus ``downsampling_factor`` if it is an image model).
+     ``build_model`` (an image model also needs a ``max_stride`` attribute, its total
+     downsampling), and register it in ``rdsandwich.upper_bound.evaluate.MODEL_CLASSES``.
 """
 from __future__ import annotations
 
@@ -142,17 +143,6 @@ def variable_rate_config(args) -> VariableRateLossyVAEConfig:
         smooth=not args.no_smooth, lmb_range=tuple(args.lmb_range), lmbda=args.lmbda,
         scale_min=args.scale_min,
     )
-
-
-def downsampling_factor(args) -> int:
-    """Total spatial downsampling of an image model (full images are padded to a multiple)."""
-    if args.model == "resnet_vae":
-        return 2 ** len(args.latent_channels)
-    if args.model == "ms2020_vae":
-        return 64  # analysis (16x) * hyper-analysis (4x)
-    if args.model == "variable_rate_lossy_vae":
-        return VariableRateLossyVAE.max_stride
-    raise ValueError(f"{args.model!r} is not an image model")
 
 
 def model_key(args) -> str:

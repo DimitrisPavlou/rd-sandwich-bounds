@@ -6,8 +6,8 @@
 # EMA, grad clip 2.0, h-flip, reflect padding, per-epoch checkpoints + resume), but
 # tiny models, 128-px patches and a handful of images. For each model:
 #   train_ub (EPOCHS epochs) -> train_ub --resume (one more epoch)
-#   -> eval_ub on Kodak (EMA weights) at a few lambdas
-# then plot_qr (Q-R and R-D) and plot_image_ub_training.
+# then evaluation/evaluate.py on Kodak (EMA weights; the variable-rate model at a few
+# lambdas), evaluation/plot.py (Q-R and R-D) and plot_image_ub_training.
 # Outputs go to checkpoints/smoke/unified and results/smoke/unified (wiped first).
 #
 # Run:   bash scripts/smoke/smoke_unified.sh
@@ -45,21 +45,40 @@ for lamb in 64 512; do
   echo "=== [resnet_vae pm1] lambda=$lamb: train $EPOCHS epochs, then resume for 1 more ==="
   run python train/train_ub.py $DEV $data $resnet --lambda "$lamb" $train --epochs "$EPOCHS"
   run python train/train_ub.py $DEV $data $resnet --lambda "$lamb" $train --epochs $((EPOCHS + 1)) --resume
-  run python evaluation/eval_ub.py $DEV $resnet --lambda "$lamb" --dataset "$KODAK" --max_images 2 \
-    --checkpoint_dir $CKPT --results_dir $RES
 done
 
 # Variable-rate model: one run, evaluated at several lambdas
 echo "=== [variable_rate_lossy_vae tiny] train $EPOCHS epochs, then resume for 1 more ==="
 run python train/train_ub.py $DEV $data $duan $train --epochs "$EPOCHS"
 run python train/train_ub.py $DEV $data $duan $train --epochs $((EPOCHS + 1)) --resume
-for lamb in 8 64 512; do
-  run python evaluation/eval_ub.py $DEV $duan --lambda "$lamb" --dataset "$KODAK" --max_images 2 \
-    --checkpoint_dir $CKPT --results_dir $RES
-done
 
-ds=$(python -c "from rdsandwich.data.datasets import dataset_name; print(dataset_name('$KODAK'))")
-run python evaluation/plot_qr.py --dataset "$ds" --results_dir $RES --out $RES/qr_$ds.png
-run python evaluation/plot_qr.py --dataset "$ds" --results_dir $RES --out $RES/rd_$ds.png --rd
+# Evaluation and plots: one YAML config per curve, one for the figures
+mkdir -p $RES
+common="datasets: {kodak: \"$KODAK\"}
+results_dir: $RES
+max_images: 2
+device: ${DEVICE:-null}"
+cat > $RES/eval_resnet_vae.yaml <<EOF
+name: resnet_vae_pm1
+label: ResNet-VAE (pm1)
+checkpoints: ["$CKPT/rdub-model=resnet_vae-range=pm1-lambda=*"]
+$common
+EOF
+cat > $RES/eval_variable_rate.yaml <<EOF
+name: variable_rate_lossy_vae
+label: Variable-rate VAE
+checkpoints: ["$CKPT/rdub-model=variable_rate_lossy_vae-*"]
+lambdas: [8, 64, 512]
+$common
+EOF
+cat > $RES/plot.yaml <<EOF
+out_dir: $RES
+curves: [resnet_vae_pm1, variable_rate_lossy_vae]
+datasets: [kodak]
+results_dir: $RES
+EOF
+run python evaluation/evaluate.py --config $RES/eval_resnet_vae.yaml
+run python evaluation/evaluate.py --config $RES/eval_variable_rate.yaml
+run python evaluation/plot.py --config $RES/plot.yaml
 run python evaluation/plot_image_ub_training.py --checkpoint_dir $CKPT --last_n 1 --out_prefix $RES/train
 echo "=== unified smoke test PASSED (figures in $RES) ==="

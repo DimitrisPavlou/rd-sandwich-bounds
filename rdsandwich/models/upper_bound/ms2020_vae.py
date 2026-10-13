@@ -159,6 +159,8 @@ class MS2020VAEConfig:
 
 
 class MS2020VAE(nn.Module):
+    max_stride = 64  # total downsampling, analysis (16x) * hyper-analysis (4x); full images are padded to a multiple
+
     def __init__(self, cfg: MS2020VAEConfig):
         super().__init__()
         self.cfg = cfg

@@ -1,0 +1,37 @@
+# =============================================================================
+# TEMPLATE: comparison figures  ->  evaluation/plot.py
+# =============================================================================
+# Plots curves evaluated by evaluation/evaluate.py (their result files
+# <results_dir>/<curve>_<dataset>.json), one line per curve:
+#   <out_dir>/qr_<dataset>.png   quality-rate: PSNR vs bits per pixel
+#   <out_dir>/rd_<dataset>.png   rate-distortion: bits per pixel vs MSE ([0, 255] scale)
+#   <out_dir>/combined.png       one row per kind, one column per dataset, one legend
+# Legend labels end with the model's parameter count. A curve keeps its color and marker
+# in every figure. Missing result files are skipped.
+#
+# Lists every key, as (type, default) plus a one-line description. Copy it to
+# configs/plots/<name>.yaml (git-ignored) and edit.
+#
+# Run:   python evaluation/plot.py --config configs/plots/<name>.yaml
+# =============================================================================
+
+out_dir: plots/images         # (str, REQUIRED)  where the figures are written.
+
+# (list[str], REQUIRED)  curves to compare: the `name` of their evaluation configs, in
+# legend order (at most 8).
+curves:
+  - vr_c64_l15_ep150
+  - resnet_vae_pm1
+
+# (list[str], REQUIRED)  dataset short names, as in the evaluation configs.
+datasets: [kodak, tecnick]
+
+results_dir: results          # (str, results)  where evaluation/evaluate.py wrote the result files.
+kinds: [qr, rd]               # (list[str], [qr, rd])  qr: PSNR vs bpp; rd: bpp vs MSE.
+distortion: float             # (str, float)  float: the unrounded reconstruction;
+                              #   uint8: the reconstruction rounded to 8-bit values.
+combined: true                # (bool, true)  also draw combined.png.
+
+# (dict[str, str], {})  legend text per curve, overriding the evaluation config's `label`.
+labels:
+  resnet_vae_pm1: "ResNet-VAE (Yang & Mandt)"

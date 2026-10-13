@@ -45,7 +45,9 @@ rdsandwich/                  installable package
     convnext_adaln.py        lambda-conditioned ConvNeXt blocks (AdaLN) of the variable-rate model
   upper_bound/               HOW the upper bound is trained and evaluated
     trainer.py               UpperBoundTrainer (any get_losses model; compile / channels_last)
-    evaluate.py              evaluate_sampled ((D, R) +/- 95% CI), evaluate_full_images (Kodak/Tecnick)
+    evaluate.py              load_model (from a checkpoint alone), evaluate_sampled ((D, R) +/- 95% CI),
+                             evaluate_full_images (Kodak/Tecnick)
+    results.py               result files and YAML configs of evaluation/evaluate.py and plot.py
   lower_bound/               HOW the lower bound is trained and evaluated
     config.py                RDLBTrainConfig
     algorithm.py             batch_mse / compute_Ck_obj / optimize_y / run_optimize_y (C_k estimator)
@@ -60,11 +62,12 @@ rdsandwich/                  installable package
   cli/                       argument parsing / model building / run naming shared by the CLIs
   sweep.py                   YAML sweep configs (expand_sweep / script_params / params_to_argv)
 train/                       train_ub.py, train_lb.py
-evaluation/                  eval_ub.py, eval_lb.py + plotting (plot_rdub, plot_rdlb, plot_qr, ...)
+evaluation/                  evaluate.py + plot.py (image R-D / Q-R curves from YAML configs),
+                             eval_ub.py, eval_lb.py, plot_rdub.py, plot_rdlb.py, training-log plots
 scripts/                     run_sweep, gen_gaussian_params, prepare_imgs, run_ba, slurm/
 configs/                     YAML experiment configs by data source: gaussian/ physics/ images/,
-                             named <model>_<train|eval>_<ub|lb>[_<variant>].yaml; templates/
-                             mirrors the source folders, one template per (model, script)
+                             named <model>_<train|eval>_<ub|lb>[_<variant>].yaml; eval/ and plots/
+                             for evaluation/evaluate.py and plot.py; templates/ mirrors them all
 experiments/                 shell scripts reproducing the paper's sweeps
 docs/figures/                model diagrams
 data/                        generated / prepared data (git-ignored)
@@ -79,11 +82,13 @@ tests/                       pytest suite
 | trainer | `UpperBoundTrainer` | `LowerBoundTrainer` |
 | evaluator | `evaluate_sampled` / `evaluate_full_images` | `estimate_R_lower_bound` |
 | training CLI | `train/train_ub.py --model {mlp_vae,resnet_vae,ms2020_vae,variable_rate_lossy_vae}` | `train/train_lb.py --model {mlp,cnn}` |
-| evaluation CLI | `evaluation/eval_ub.py` | `evaluation/eval_lb.py` |
+| evaluation CLI | `evaluation/evaluate.py` (images, YAML), `evaluation/eval_ub.py` | `evaluation/eval_lb.py` |
 
-Training and evaluation are separate scripts. An evaluation CLI takes the same
-model flags (and `--checkpoint_dir`, `--lambda`/`--lamb`) as training: they
-determine the run directory, whose newest checkpoint is loaded (or pass `--ckpt`).
+Training and evaluation are separate scripts. `evaluation/evaluate.py` rebuilds
+the model from the checkpoint itself (see [Evaluating and comparing image models](#evaluating-and-comparing-image-models)).
+`eval_ub.py` and `eval_lb.py` take the same model flags (and `--checkpoint_dir`,
+`--lambda`/`--lamb`) as training: they determine the run directory, whose
+most-trained checkpoint is loaded (or pass `--ckpt`).
 
 ### Data: `--dataset`
 
@@ -112,10 +117,14 @@ Every CLI takes `--dataset`, which is one of
    and PSNR the same way for every model. Optionally, a
    `diagnostics(x) -> dict` method adds model statistics to the trainer's
    explosion report (written when the loss or gradients become non-finite).
+   An image model also needs a `max_stride` attribute (its total downsampling;
+   full images are padded to a multiple of it), and a variable-rate model a
+   `variable_rate = True` attribute and `forward(x, lmbda=...)`.
 2. In `rdsandwich/cli/upper_bound.py`, add its name to `MODELS`, its flags to
-   `add_model_args`, and a branch to `build_model` (plus `downsampling_factor`
-   for an image model, and entries in `model_key` / `get_runname` if its curve
-   needs more than the model name).
+   `add_model_args`, and a branch to `build_model` (plus entries in `model_key` /
+   `get_runname` if its curve needs more than the model name). Register its model
+   and config classes in `MODEL_CLASSES` (`rdsandwich/upper_bound/evaluate.py`),
+   so `load_model` can rebuild it from a checkpoint.
 3. Add `<model>_train_ub.template.yaml` and `<model>_eval_ub.template.yaml` to
    `configs/templates/<source>/` (`tests/test_configs.py` checks they list every flag).
 
@@ -155,9 +164,9 @@ arch="--model resnet_vae --latent_channels 4,8,16,32,64,128 --ar_prior_levels 4 
 python train/train_ub.py $arch --lambda 0.01 --dataset /path/to/my_coco_train2017 --patchsize 256 \
     --batchsize 8 --lr 1e-4 --epochs 600 --lr_schedule plateau --warmup 400 --patience 20 \
     --checkpoint_dir checkpoints/img_compression --compile -V
-python evaluation/eval_ub.py $arch --lambda 0.01 --dataset data/kodak \
-    --checkpoint_dir checkpoints/img_compression --results_dir results/img_compression
-python evaluation/plot_qr.py --dataset kodak --results_dir results/img_compression --out results/qr_kodak.png
+# evaluate every lambda's run on Kodak/Tecnick, then plot (see "Evaluating and comparing image models")
+python evaluation/evaluate.py --config configs/eval/resnet_vae.yaml
+python evaluation/plot.py --config configs/plots/images.yaml
 ```
 
 See `configs/` for YAML sweep definitions and `experiments/` for shell scripts
@@ -187,16 +196,73 @@ ln -s /path/to/coco/train2017 data/coco_train2017          # raw COCO train2017
 bash scripts/smoke/smoke_unified.sh                          # minutes: the whole pipeline, tiny models
 python scripts/run_sweep.py --config configs/images/resnet_vae_train_ub_pm1.yaml   # 6 lambdas
 python scripts/run_sweep.py --config configs/images/variable_rate_lossy_vae_train_ub.yaml
-python scripts/run_sweep.py --config configs/images/resnet_vae_eval_ub_pm1.yaml
-python scripts/run_sweep.py --config configs/images/variable_rate_lossy_vae_eval_ub.yaml
-python evaluation/plot_qr.py --dataset kodak --results_dir results/natural_images_unified \
-    --out results/natural_images_unified/qr_kodak.png
+python evaluation/evaluate.py --config configs/eval/resnet_vae_pm1.yaml           # see below
+python evaluation/evaluate.py --config configs/eval/variable_rate_lossy_vae.yaml
+python evaluation/plot.py --config configs/plots/images.yaml
 ```
 
 On Slurm, `scripts/slurm/train_ub_unified.sbatch` runs array task `i` as the
 `i`-th run of a config (`--export=ALL,CONFIG=configs/<source>/<name>.yaml`). Batch 32 at
 256x256 in fp32 does not fit an 11 GB GPU for either model; the 186.7M-parameter
 base model needs roughly 45 GB (an 80 GB H100).
+
+## Evaluating and comparing image models
+
+Two scripts, each driven by a YAML file; copy the templates in
+`configs/templates/eval/` and `configs/templates/plots/` to `configs/eval/` and
+`configs/plots/` (git-ignored) and edit them.
+
+**1. `evaluation/evaluate.py`: one config per curve.** It lists checkpoints and
+test sets; the model is rebuilt from each checkpoint (which stores its config),
+so no model flags are needed and checkpoints downloaded from a cluster can be
+evaluated as they are.
+
+```yaml
+# configs/eval/variable_rate_lossy_vae.yaml
+name: variable_rate_lossy_vae          # -> results/variable_rate_lossy_vae_<dataset>.json
+label: "Variable-rate VAE (Duan et al.)"
+checkpoints: [checkpoints/lvae_variable_rate_full_coco/rdub-model=variable_rate_lossy_vae-C=128-L=1_2_3_4_5-lmb=4_2048]
+lambdas: [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
+datasets: {kodak: data/kodak, tecnick: data/tecnick}
+```
+
+- **Fixed-rate models** (`resnet_vae`, `ms2020_vae`): list one checkpoint per lambda
+  (e.g. the glob `checkpoints/<dir>/rdub-model=resnet_vae-range=pm1-lambda=*`) and
+  leave `lambdas` out; each checkpoint is evaluated at the lambda it was trained with.
+- **Variable-rate models** (`variable_rate_lossy_vae`): list the one checkpoint and set
+  `lambdas` (within its training range); the model is loaded once for all of them.
+- A checkpoint entry is a file, a run directory (its most-trained checkpoint, by
+  epoch rather than file time) or a glob of either; a curve takes one checkpoint per run.
+  To compare training stages, make one curve per checkpoint (`ckpt-epoch=0050.pt`, ...).
+
+```bash
+python evaluation/evaluate.py --config configs/eval/variable_rate_lossy_vae.yaml   # --force to redo
+```
+
+It writes `results/<name>_<dataset>.json` per test set: per lambda, the mean bpp,
+MSE and PSNR (unrounded and 8-bit-rounded) and the per-image values. Test sets that
+already have a result file are skipped. The seed is reset before every point, so a
+point does not depend on which other lambdas were evaluated with it.
+
+**2. `evaluation/plot.py`: one config per set of figures.** It compares any
+evaluated curves, by name, and needs no model or GPU:
+
+```yaml
+# configs/plots/images.yaml
+out_dir: plots/images
+curves: [resnet_vae_pm1, variable_rate_lossy_vae]   # legend order
+datasets: [kodak, tecnick]
+kinds: [qr, rd]                # qr: PSNR vs bpp; rd: bpp vs MSE ([0, 255] scale)
+distortion: float              # or uint8 (8-bit-rounded reconstructions)
+combined: true                 # also combined.png: one row per kind, one column per dataset
+```
+
+```bash
+python evaluation/plot.py --config configs/plots/images.yaml
+```
+
+It draws `qr_<dataset>.png`, `rd_<dataset>.png` and `combined.png`, one line per
+curve; a curve keeps its color and marker in every figure.
 
 ## Running sweeps: YAML configs or bash
 
