@@ -350,66 +350,7 @@ class ResNetVAE(nn.Module):
     def forward(self, x, training: Optional[bool] = None, return_stats: bool = False):
         """``return_stats=True`` adds ``out["stats"]``: per-level min/max/non-finite
         summaries of every latent's loc/scale/bits (slow; for explosion diagnostics)."""
-        # Bottom-up: collect features in generative (top-to-bottom) order.
-        #bu_features: List[torch.Tensor] = []
-        #fx = x
-        #for j, enc in enumerate(self.encoders):
-        #    # The top block emits z0's posterior parameters, so like the other latent heads it runs in fp32.
-        #    fx = call_fp32(enc, fx) if j == self.num_levels - 1 else enc(fx)
-        #    bu_features.insert(0, fx)  # last (topmost) ends at index 0
         
-        #bits_per_level: List[torch.Tensor] = []
-        #stats = {} if return_stats else None
-        #t = None
-        #for i in range(self.num_levels):
-        #    b = bu_features[i]
-        #    level_stats = {} if return_stats else None
-        #    if i == 0:  # top latent z0
-        #        q_loc, q_raw_scale = torch.chunk(b, 2, dim=1)
-        #        q_scale = softplus_scale(q_raw_scale, self.cfg.scale_min)
-        #        z0 = q_loc + q_scale * torch.randn_like(q_loc)
-        #        log_q = normal_log_prob(z0, q_loc, q_scale).flatten(1).sum(-1)
-        #        log_p = self.df_prior.log_prob_nchw(z0)
-        #        z_bits = (log_q - log_p) / LN2
-        #        t = z0
-        #        if return_stats:
-        #            level_stats.update(q_loc=_tstats(q_loc), q_scale=_tstats(q_scale),
-        #                               z=_tstats(z0), log_q=_tstats(log_q), log_p=_tstats(log_p))
-        #    else:
-        #        _, z_bits, t = self.latent_blocks[i](b, t, stats=level_stats)
-        #    bits_per_level.append(z_bits)
-        #    if return_stats:
-        #        level_stats["bits"] = _tstats(z_bits)
-        #        level_stats["bu_feature"] = _tstats(b)
-        #        stats[f"level{i}"] = level_stats
-        #    t = self.decoders[i](t)
-#
-        #bits = torch.stack(bits_per_level, dim=0).sum(dim=0)  # [B]
-        #num_pixels = x.shape[0] * x.shape[-2] * x.shape[-1]
-        #bpp = bits.sum() / num_pixels
-#
-        #if self.cfg.image_range == "pm1":
-        #    x_hat_pm1 = t
-        #    mses_pm1 = ((x_hat_pm1 - (x / 127.5 - 1.0)) ** 2).flatten(1).mean(-1)
-        #    rate = bits * LN2 / x[0].numel()                  # nats per sub-pixel, per image
-        #    loss = (rate + self.cfg.lmbda * mses_pm1).mean()
-        #    mses = mses_pm1 * MSE_PM1_TO_255
-        #    x_hat = (x_hat_pm1 + 1.0) * 127.5
-        #else:
-        #    x_hat = t
-        #    mses = ((x - x_hat) ** 2).flatten(1).mean(-1)     # per image, in [0,255]^2 units
-        #    loss = bpp + self.cfg.lmbda * mses.mean()
-        #mse = mses.mean()
-        ## PSNR (dB) per image, at 8-bit peak, for logging/eval.
-        #psnr = (20 * math.log10(255.0) - 10.0 * torch.log10(mses.clamp_min(1e-12))).mean()
-        #out = dict(loss=loss, bpp=bpp, mse=mse, mses=mses, bits=bits, x_hat=x_hat, psnr=psnr)
-        #if return_stats:
-        #    stats["x_hat"] = _tstats(x_hat)
-        #    stats.update(loss=loss.item(), bpp=bpp.item(), mse=mse.item())
-        #    out["stats"] = stats
-        #return out
-
-
         stats = {} if return_stats else None
         bu_features = self.bottom_up(x)
         dec_out, bits = self.top_down(bu_features, stats) 
